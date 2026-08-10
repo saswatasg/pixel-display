@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+html {
+  color-scheme: dark;
+}
+
+input[type="range"] {
+  cursor: pointer;
+}

@@ -1,0 +1,10 @@
+{
+  "host": "127.0.0.1",
+  "port": 8000,
+  "apiKey": "generate-a-long-random-string",
+  "address": "auto",
+  "deviceId": "pixel-display",
+  "displaySize": 32,
+  "reconnectIntervalSec": 5,
+  "allowedOrigins": ["*"]
+}

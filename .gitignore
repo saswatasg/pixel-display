@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+.vercel/
+.next/
+out/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# secrets / local config
+services/bridge/config.json
+apps/web/.env.local
+.env
+.env*.local
+
+# misc
+.DS_Store
+*.log
