@@ -125,6 +125,7 @@ class DeviceManager:
         return bool(self.conn.client and self.conn.client.is_connected)
 
     async def _reconnect_loop(self) -> None:
+        failed_streak = 0
         while not self._stopping:
             try:
                 if not self.is_connected:
@@ -137,12 +138,23 @@ class DeviceManager:
                         self.status["address"] = self.conn.address
                         self.status["lastConnectedAt"] = time.time()
                         self.status["lastError"] = None
+                        failed_streak = 0
                         log.info("display connected: %s", self.conn.address)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 self.status["connected"] = False
                 self.status["lastError"] = str(exc)
+                failed_streak += 1
+                if failed_streak >= 3:
+                    # macOS CoreBluetooth can wedge after a drop; a fresh
+                    # BleakClient gets a new CBCentralManager and recovers.
+                    try:
+                        await self.conn.disconnect()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self.conn.client = None
+                    failed_streak = 0
                 log.warning("connection attempt failed: %s", exc)
             await asyncio.sleep(self.cfg.reconnect_interval)
 

@@ -38,39 +38,42 @@ First smoke test of the display: `curl -X POST -H "X-API-Key: <key>" -H "Content
 
 ## Install as a launchd service (survives reboots/logouts)
 
-One command does everything (deploy → venv → plist → load):
+One command does everything (deploy → venv → wrapper app → plist → load):
 
 ```sh
 cd services/bridge
 ./install.sh
 ```
 
-Why a copy to `~/pixel-display-bridge`? If the repo lives inside iCloud Drive, macOS denies
-launchd agents access to iCloud-protected paths (`PermissionError ... pyvenv.cfg`). The script
-deploys a runtime copy outside iCloud; the repo stays the source of truth — re-run `install.sh`
-after bridge code changes. Manual fallback:
+The bridge runs wrapped in a **PixelBridge.app** bundle. This is required on macOS: a bare
+Python binary spawned by launchd is always denied Bluetooth access ("BLE is not authorized"),
+because there's no GUI/TCC flow for it. A proper `.app` (with `NSBluetoothAlwaysUsageDescription`)
+gets its own *"PixelBridge would like to use Bluetooth"* prompt — allow it once and the grant
+sticks for the background service. The `.app`'s embedded launcher runs uvicorn and restarts it
+if it ever exits.
+
+Two locations involved:
+
+- `~/Library/LaunchAgents/com.pixelbridge.idotmatrix.plist` — the launchd job: `open -g
+  PixelBridge.app` at login (RunAtLoad).
+- `~/pixel-display-bridge/` — runtime copy of the bridge + the `.app`. If the repo lives
+  inside iCloud Drive, macOS denies launchd agents access to iCloud-protected paths
+  (`PermissionError ... pyvenv.cfg`), so the runtime copy lives outside iCloud. Re-run
+  `./install.sh` after bridge code changes.
+
+Check / unload:
 
 ```sh
-cd services/bridge
-mkdir -p logs
-# create the plist from the template (fill in __VENV_PYTHON__ and __BRIDGE_DIR__)
-sed -e "s|__VENV_PYTHON__|$(pwd)/.venv/bin/python|" \
-    -e "s|__BRIDGE_DIR__|$(pwd)|" \
-    launchd/com.pixelbridge.idotmatrix.plist.template > ~/Library/LaunchAgents/com.pixelbridge.idotmatrix.plist
-launchctl load ~/Library/LaunchAgents/com.pixelbridge.idotmatrix.plist
-# check it:
 launchctl list | grep pixelbridge
-cat logs/bridge.log
-# unload if needed:
-launchctl unload ~/Library/LaunchAgents/com.pixelbridge.idotmatrix.plist
+launchctl unload ~/Library/LaunchAgents/com.pixelbridge.idotmatrix.plist   # stop
 ```
 
-Notes:
+Other notes:
 
-- On first BLE connection, macOS may prompt to allow Bluetooth access for Python/uvicorn —
-  approve it in System Settings > Privacy & Security > Bluetooth.
-- KeepAlive + ThrottleInterval restart the process if it dies; the bridge itself also
-  auto-reconnects the BLE link when the Mac wakes from sleep.
+- If you reinstall and the display doesn't connect: System Settings > Privacy & Security >
+  Bluetooth — re-launch the app once or allow "PixelBridge" if listed.
+- The bridge auto-reconnects the BLE link when the Mac wakes from sleep and resets a stale
+  Bluetooth stack after 3 failed attempts (fresh CoreBluetooth instance).
 - The Mac must be awake (or scheduled to stay awake) for remote control to work.
 
 ## Remote access via Tailscale
