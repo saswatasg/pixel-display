@@ -2,32 +2,59 @@
 
 import type { AppStatus } from "@/lib/types";
 
+type Level = "good" | "warn" | "bad" | "pending";
+
 export function StatusBar({ status }: { status: AppStatus | null }) {
-  let dot = "bg-zinc-500";
+  let level: Level = "pending";
   let label = "Connecting…";
+  let dotClass = "bg-zinc-500";
+  let pulse = true;
+
   if (status?.bridgeOnline) {
-    dot = status.bridge?.device.connected ? "bg-emerald-400" : "bg-amber-400";
-    label = status.bridge?.device.connected
-      ? "Display connected"
-      : "Bridge online — connecting to display…";
+    if (status.bridge?.device.connected === true) {
+      level = "good";
+      label = "Online";
+      dotClass = "bg-emerald-400";
+      pulse = false;
+    } else {
+      level = "warn";
+      label = "Linking…";
+      dotClass = "bg-amber-400";
+      pulse = true;
+    }
   } else if (status?.configured === false) {
-    dot = "bg-red-400";
-    label = "Bridge not configured (server env)";
+    level = "bad";
+    label = "Not configured";
+    dotClass = "bg-red-400";
+    pulse = true;
   } else if (status) {
-    dot = "bg-red-400";
-    label = "Bridge offline";
+    level = "bad";
+    label = "Offline";
+    dotClass = "bg-red-400";
+    pulse = true;
   }
 
+  const ring = {
+    good: "border-emerald-400/25 bg-emerald-500/10",
+    warn: "border-amber-400/25 bg-amber-500/10",
+    bad: "border-red-400/25 bg-red-500/10",
+    pending: "border-white/10 bg-white/[0.04]",
+  }[level];
+
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/80 px-3 py-2">
-      <span className={`h-2.5 w-2.5 rounded-full ${dot} ${dot === "bg-emerald-400" ? "" : "animate-pulse"}`} />
-      <span className="text-sm text-zinc-200">{label}</span>
-      {status && status.bridgeOnline && status.bridge?.device.address && (
-        <span className="ml-auto truncate text-xs text-zinc-500">{status.bridge.device.address}</span>
-      )}
-      {status && !status.bridgeOnline && status.reason && (
-        <span className="ml-auto hidden max-w-[45%] truncate text-xs text-zinc-500 sm:block">{status.reason}</span>
-      )}
-    </div>
+    <span
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${ring}`}
+      title={label}
+    >
+      <span className="relative flex h-2 w-2">
+        {pulse && status && (
+          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${dotClass} opacity-60`} />
+        )}
+        <span className={`relative inline-flex h-2 w-2 rounded-full ${dotClass}`} />
+      </span>
+      <span className={level === "good" ? "text-emerald-300" : level === "bad" ? "text-red-300" : "text-zinc-300"}>
+        {label}
+      </span>
+    </span>
   );
 }

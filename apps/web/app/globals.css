@@ -1,9 +1,204 @@
 @import "tailwindcss";
 
-html {
-  color-scheme: dark;
+@theme {
+  --font-display: "Press Start 2P", ui-monospace, monospace;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --animate-fade-up: fade-up 0.22s ease-out both;
+  --animate-fade-in: fade-in 0.18s ease-out both;
+  --animate-toast-in: toast-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-pop: pop 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-pulse-soft: pulse-soft 2.4s ease-in-out infinite;
+  --animate-shimmer: shimmer 1.6s linear infinite;
 }
 
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.92);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+html {
+  color-scheme: dark;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(245, 158, 11, 0.07), transparent 60%),
+    radial-gradient(900px 500px at 100% 110%, rgba(245, 158, 11, 0.04), transparent 55%),
+    #09090b;
+}
+
+/* Decorative pixel grid backdrop */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(113, 113, 122, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(113, 113, 122, 0.06) 1px, transparent 1px);
+  background-size: 16px 16px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 55% at 50% 0%, black, transparent);
+  mask-image: radial-gradient(ellipse 70% 55% at 50% 0%, black, transparent);
+}
+
+/* Pixel wordmark: crisp, no anti-alias blur on the glyph */
+.pixel-text {
+  -webkit-font-smoothing: none;
+  font-variant-ligatures: none;
+}
+
+.text-glow {
+  text-shadow: 0 0 18px rgba(245, 158, 11, 0.5);
+}
+
+.glow-amber {
+  box-shadow: 0 8px 30px -6px rgba(245, 158, 11, 0.55);
+}
+
+.card-lift {
+  transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Focus rings for accessibility */
+:focus-visible {
+  outline: 2px solid rgba(251, 191, 36, 0.8);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ---------- Range slider ---------- */
 input[type="range"] {
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 22px;
+  background: transparent;
+}
+input[type="range"]:focus-visible {
+  outline: none;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(251, 191, 36, 0.9), rgba(251, 191, 36, 0.45));
+  box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border-radius: 9999px;
+  background: #fbbf24;
+  border: 3px solid #0a0a0a;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 14px rgba(251, 191, 36, 0.75);
+  transition: transform 0.12s ease;
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(251, 191, 36, 0.9), rgba(251, 191, 36, 0.45));
+  box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #fbbf24;
+  border: 3px solid #0a0a0a;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 14px rgba(251, 191, 36, 0.75);
+}
+
+/* Number input spinners: subtle */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  opacity: 0.35;
+}
+
+/* Thin, dark scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
 }

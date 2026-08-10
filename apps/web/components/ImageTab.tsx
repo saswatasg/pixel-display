@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { sendFile } from "@/lib/api";
-import { Button, Card } from "./ui";
+import { Button, Card, Icon, ICONS } from "./ui";
 import { PixelPreview } from "./PixelPreview";
+import { DisplayBezel } from "./DisplayBezel";
 
 interface Props {
   connected: boolean;
@@ -12,16 +13,16 @@ interface Props {
 }
 
 export function ImageTab({ connected, onSend, onToast }: Props) {
-  const [file, setFile] = useState<File | null>(null);
+  const [fileInfo, setFileInfo] = useState<{ file: File | null }>({ file: null });
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
-  const isGif = file?.type === "image/gif" || file?.name.toLowerCase().endsWith(".gif");
+  const file = fileInfo.file;
+
+  const isGif = Boolean(file && (file.type === "image/gif" || file.name.toLowerCase().endsWith(".gif")));
 
   const pick = useCallback((f: File | null) => {
-    if (f && !f.type.startsWith("image/")) return;
-    setFile(f);
+    setFileInfo({ file: f && f.type.startsWith("image/") ? f : null });
   }, []);
 
   async function send() {
@@ -30,15 +31,15 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
     try {
       const res = await sendFile(isGif ? "gif" : "image", file);
       if (res.ok) onToast(isGif ? "GIF sent to display" : "Image sent to display");
-      else onToast(res.error ?? "Failed");
+      else onToast(res.error ?? "Upload failed");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="space-y-4">
-      <Card title="Upload">
+    <div className="space-y-5">
+      <Card icon={<Icon d={ICONS.image} className="h-5 w-5" />} title="Upload" subtitle="PNG · JPG · GIF — max 5 MB">
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -50,21 +51,30 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
             setDragging(false);
             pick(e.dataTransfer.files?.[0] ?? null);
           }}
-          onClick={() => inputRef.current?.click()}
-          className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-4 py-10 text-center transition-colors ${
-            dragging ? "border-amber-400 bg-amber-500/10" : "border-white/20 hover:border-white/40"
+          onClick={() =>
+            (document.getElementById("image-input") as HTMLInputElement | null)?.click()
+          }
+          className={`flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-4 py-12 text-center transition-all ${
+            dragging
+              ? "border-amber-400 bg-amber-500/10 scale-[0.99]"
+              : "border-white/20 hover:border-white/40 hover:bg-white/[0.02]"
           }`}
         >
-          <p className="text-sm font-medium text-zinc-200">
-            {file ? file.name : "Drop an image or GIF here"}
-          </p>
-          <p className="text-xs text-zinc-500">
-            {file
-              ? `${(file.size / 1024).toFixed(0)} KB · ${isGif ? "GIF" : "image"} · max 5 MB`
-              : "or tap to browse · PNG / JPG / GIF"}
-          </p>
+          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-400">
+            <Icon d={ICONS.image} className="h-6 w-6" />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-zinc-100">
+              {file ? file.name : "Drop an image or GIF"}
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              {file
+                ? `${(file.size / 1024).toFixed(0)} KB · ${isGif ? "GIF" : "image"}`
+                : "or tap to browse from your device"}
+            </p>
+          </div>
           <input
-            ref={inputRef}
+            id="image-input"
             type="file"
             accept="image/*"
             className="hidden"
@@ -73,19 +83,21 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
         </div>
 
         {file && (
-          <div className="mt-4 flex flex-col items-center gap-4">
-            <div className="flex items-center gap-4">
+          <div className="mt-5 flex flex-col items-center gap-4 animate-fade-up">
+            <DisplayBezel
+              label={isGif ? "FIRST FRAME" : "32 × 32 PREVIEW"}
+              powered={connected}
+            >
               <PixelPreview file={file} />
-            </div>
-            <p className="text-xs text-zinc-500">
-              Preview shows the {isGif ? "first frame of the GIF" : "image"} scaled to 32×32 — the
-              display shows exactly this pixel grid.
+            </DisplayBezel>
+            <p className="max-w-xs text-center text-xs text-zinc-500">
+              This is exactly what your display will show — every pixel maps 1:1 onto the 32×32 grid.
             </p>
             <div className="flex gap-2">
               <Button onClick={send} disabled={busy || !connected}>
                 {busy ? "Uploading…" : `Send ${isGif ? "GIF" : "image"}`}
               </Button>
-              <Button variant="ghost" onClick={() => setFile(null)}>
+              <Button variant="ghost" onClick={() => pick(null)}>
                 Clear
               </Button>
             </div>
@@ -93,12 +105,24 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
         )}
       </Card>
 
-      <Card title="Tips">
-        <ul className="list-inside list-disc space-y-1 text-sm text-zinc-400">
-          <li>Images are resized and processed on the bridge before upload.</li>
-          <li>Square images (32×32 or larger) look best.</li>
-          <li>GIFs are re-encoded at 32×32 with nearest-neighbor scaling.</li>
-          <li>Presets are not available for images/GIFs in v1.</li>
+      <Card title="Tips" icon={<Icon d={ICONS.sparkle} className="h-5 w-5" />}>
+        <ul className="space-y-2 text-sm text-zinc-400">
+          <li className="flex gap-2">
+            <span className="text-amber-400">·</span>
+            <span>Square images (32×32 or larger) look best.</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-amber-400">·</span>
+            <span>Images are resized and processed on the bridge before upload.</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-amber-400">·</span>
+            <span>GIFs are re-encoded at 32×32 with nearest-neighbour scaling.</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-amber-400">·</span>
+            <span>Presets aren&apos;t available for images/GIFs.</span>
+          </li>
         </ul>
       </Card>
     </div>

@@ -1,16 +1,46 @@
+import { Agent } from "undici";
 import type { AppStatus, BridgeStatus } from "./types";
 
 export const BRIDGE_URL = process.env.BRIDGE_URL ?? "";
 export const BRIDGE_API_KEY = process.env.BRIDGE_API_KEY ?? "";
 export const BRIDGE_CONFIGURED = Boolean(BRIDGE_URL && BRIDGE_API_KEY);
 
+const BRIDGE_HOSTNAME =
+  process.env.BRIDGE_HOSTNAME ?? (BRIDGE_URL.startsWith("https://") ? BRIDGE_URL.slice(8).split("/")[0] : "");
+const BRIDGE_HOST_IPS = (process.env.BRIDGE_HOST_IP ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+
 const TIMEOUT_MS = 8_000;
 
-async function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
+function buildAgent(ip: string) {
+  return new Agent({
+    connect: {
+      servername: BRIDGE_HOSTNAME,
+      lookup: (_hostname: string, _opts: unknown, cb: (err: Error | null, addr: { address: string; family: number }[]) => void) => {
+        cb(null, [{ address: ip, family: 4 }]);
+      },
+    },
+  });
+}
+
+export async function bridgeFetch(url: string, init: RequestInit = {}, timeoutMs = TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    if (BRIDGE_HOST_IPS.length === 0) {
+      return await fetch(url, { ...init, signal: controller.signal, cache: "no-store" });
+    }
+    const ip = BRIDGE_HOST_IPS[Math.floor(Math.random() * BRIDGE_HOST_IPS.length)];
+    const agent = buildAgent(ip);
+    try {
+      return await fetch(url, {
+        ...init,
+        signal: controller.signal,
+        dispatcher: agent,
+        cache: "no-store",
+      } as RequestInit);
+    } finally {
+      agent.close();
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -30,9 +60,8 @@ export async function fetchBridgeStatus(): Promise<AppStatus> {
     };
   }
   try {
-    const res = await fetchWithTimeout(`${BRIDGE_URL}/status`, {
+    const res = await bridgeFetch(`${BRIDGE_URL}/status`, {
       headers: bridgeHeaders(),
-      cache: "no-store",
     });
     if (res.ok) {
       const bridge = (await res.json()) as BridgeStatus;
@@ -45,10 +74,15 @@ export async function fetchBridgeStatus(): Promise<AppStatus> {
       fetchedAt: Date.now(),
     };
   } catch (err) {
+    const cause = (err as { cause?: { code?: string; message?: string } })?.cause;
+    const detail =
+      cause && (cause.code || cause.message)
+        ? `${cause.code ?? cause.message}${cause.message ? `: ${cause.message}` : ""}`
+        : "";
     return {
       bridgeOnline: false,
       configured: true,
-      reason: err instanceof Error ? err.message : "bridge unreachable",
+      reason: `bridge unreachable: ${err instanceof Error ? err.message : String(err)}${detail ? ` [${detail}]` : ""}`,
       fetchedAt: Date.now(),
     };
   }
