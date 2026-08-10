@@ -7,6 +7,8 @@ import { sendFile } from "@/lib/api";
 import { Button, Card, Icon, ICONS, Slider, type IconName, Spinner } from "./ui";
 import { ColorPicker } from "./ColorPicker";
 
+const FRAME_LIMIT = 4;
+
 interface Props {
   connected: boolean;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<boolean>;
@@ -130,14 +132,19 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
   const list = () => symbols.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 
   const apply = async () => {
-    if (list().length === 0) {
+    const syms = list();
+    if (syms.length === 0) {
       onToast("Add at least one symbol");
+      return;
+    }
+    if (syms.length > FRAME_LIMIT) {
+      onToast(`Up to ${FRAME_LIMIT} symbols on the ticker`);
       return;
     }
     setBusy(true);
     try {
-      const ok = await onSend("stocks", { symbols: list(), color, interval });
-      if (ok) onToast(`Ticker on — ${list().join(", ")}`);
+      const ok = await onSend("stocks", { symbols: syms, color, interval });
+      if (ok) onToast(`Ticker on — ${syms.join(", ")}`);
     } finally {
       setBusy(false);
     }
@@ -146,22 +153,27 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
   return (
     <div className="space-y-4">
       <div>
-        <SectionLabel>Symbols (comma separated)</SectionLabel>
+        <SectionLabel>Symbols — up to {FRAME_LIMIT}, comma separated</SectionLabel>
         <input
           type="text"
           value={symbols}
           onChange={(e) => setSymbols(e.target.value)}
-          placeholder="AAPL, NVDA, MSFT"
+          placeholder="AAPL, NVDA or RELIANCE.NS, TCS.NS, INFY.NS, HDFCBANK.NS"
           className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-2.5 font-mono text-sm uppercase text-zinc-100 placeholder:font-sans placeholder:normal-case placeholder:text-zinc-600 outline-none focus:border-amber-500"
           aria-label="Stock symbols"
         />
+        <p className="mt-1.5 text-xs text-zinc-500">
+          Indian listings work too — NSE: <span className="font-mono">.NS</span> (e.g. RELIANCE.NS, TCS.NS) · BSE:{" "}
+          <span className="font-mono">.BO</span>. The display rotates one symbol at a time showing today&apos;s %
+          change, refreshed every {interval} min.
+        </p>
       </div>
       <div>
-        <SectionLabel>Color</SectionLabel>
+        <SectionLabel>Ticker color</SectionLabel>
         <ColorPicker value={color} onChange={setColor} />
       </div>
       <Slider
-        label="Update interval"
+        label="Refresh quotes"
         value={interval}
         min={5}
         max={120}
@@ -216,7 +228,7 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
     try {
       const res = await sendFile("media-add", file);
       if (res.ok) {
-        onToast("Saved to photo frame");
+        onToast("Saved to photo frame — " + file.name);
         refresh();
       } else {
         onToast(res.error ?? "Upload failed");
@@ -246,9 +258,23 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
 
   return (
     <div className="space-y-4">
-      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-white/20 px-4 py-6 text-sm text-zinc-400 transition-colors hover:border-amber-400/60 hover:text-zinc-200">
+      <div className="flex items-center justify-between text-xs text-zinc-500">
+        <span>Photos are converted to 32×32 pixels on the bridge</span>
+        <span className="font-mono">{media === null ? "…" : `${media.length} / ${FRAME_LIMIT}`}</span>
+      </div>
+      <label
+        className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-6 text-sm transition-colors ${
+          media === null || (media?.length ?? 0) < FRAME_LIMIT
+            ? "border-white/20 text-zinc-400 hover:border-amber-400/60 hover:text-zinc-200"
+            : "pointer-events-none border-white/5 text-zinc-600"
+        }`}
+      >
         <Icon d={ICONS.plus} className="h-4 w-4" />
-        {uploading ? "Uploading…" : "Upload a photo to the frame"}
+        {uploading
+          ? "Uploading…"
+          : (media?.length ?? 0) >= FRAME_LIMIT
+            ? `Frame full (${FRAME_LIMIT} photos) — remove one first`
+            : "Upload a photo to the frame"}
         <input
           type="file"
           accept="image/*"

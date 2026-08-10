@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { sendFile } from "@/lib/api";
 import { Button, Card, Icon, ICONS } from "./ui";
 import { PixelPreview } from "./PixelPreview";
@@ -12,19 +12,110 @@ interface Props {
   onToast: (message: string) => void;
 }
 
+interface PastImage {
+  id: string;
+  name: string;
+  dataUrl: string;
+  at: number;
+}
+
+const HISTORY_KEY = "pixel-display:past-images:v1";
+const HISTORY_LIMIT = 10;
+
+function loadHistory(): PastImage[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as PastImage[];
+    return Array.isArray(parsed) ? parsed.slice(0, HISTORY_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(items: PastImage[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
+  } catch {
+    // storage full/blocked — history is best-effort
+  }
+}
+
 export function ImageTab({ connected, onSend, onToast }: Props) {
   const [fileInfo, setFileInfo] = useState<{ file: File | null }>({ file: null });
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [history, setHistory] = useState<PastImage[]>([]);
 
   const file = fileInfo.file;
 
   const isGif = Boolean(file && (file.type === "image/gif" || file.name.toLowerCase().endsWith(".gif")));
 
-  const pick = useCallback((f: File | null) => {
-    setFileInfo({ file: f && f.type.startsWith("image/") ? f : null });
+  useEffect(() => {
+    setHistory(loadHistory());
   }, []);
+
+  const toPixelDataUrl = useCallback(async (f: File): Promise<string | null> => {
+    try {
+      const bitmap = await createImageBitmap(f);
+      const canvas = document.createElement("canvas");
+      canvas.width = 32;
+      canvas.height = 32;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        bitmap.close();
+        return null;
+      }
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(bitmap, 0, 0, 32, 32);
+      bitmap.close();
+      return canvas.toDataURL("image/png");
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const remember = useCallback(
+    async (f: File) => {
+      const dataUrl = await toPixelDataUrl(f);
+      if (!dataUrl) return;
+      setHistory((prev) => {
+        const next = [{ id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: f.name, dataUrl, at: Date.now() }, ...prev].slice(0, HISTORY_LIMIT);
+        saveHistory(next);
+        return next;
+      });
+    },
+    [toPixelDataUrl],
+  );
+
+  const pick = useCallback(
+    (f: File | null) => {
+      setFileInfo({ file: f && f.type.startsWith("image/") ? f : null });
+      if (f && f.type.startsWith("image/")) remember(f);
+    },
+    [remember],
+  );
+
+  const deletePast = useCallback((id: string) => {
+    setHistory((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      saveHistory(next);
+      return next;
+    });
+  }, []);
+
+  const sendPast = useCallback(
+    async (p: PastImage) => {
+      const res = await fetch(p.dataUrl);
+      const blob = await res.blob();
+      const f = new File([blob], p.name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png" });
+      const sent = await sendFile("image", f);
+      if (sent.ok) onToast("Past image sent to display");
+      else onToast(sent.error ?? "Send failed");
+    },
+    [onToast],
+  );
 
   async function send() {
     if (!file) return;
@@ -122,6 +213,38 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
           </div>
         )}
       </Card>
+
+      {history.length > 0 && (
+        <Card
+          title="Past images"
+          subtitle={`Pixel-converted uploads kept on this device — newest ${HISTORY_LIMIT} only`}
+          icon={<Icon d={ICONS.copy} className="h-5 w-5" />}
+        >
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {history.map((p) => (
+              <div key={p.id} className="group w-28 shrink-0">
+                <div className="relative overflow-hidden rounded-lg border border-white/15 bg-black">
+                  <img src={p.dataUrl} alt={p.name} className="aspect-square w-full" style={{ imageRendering: "pixelated" }} />
+                  <button
+                    type="button"
+                    aria-label={`Delete ${p.name}`}
+                    onClick={() => deletePast(p.id)}
+                    className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-md bg-zinc-950/80 text-zinc-400 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                  >
+                    <Icon d={ICONS.trash} className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <p className="mt-1.5 truncate text-[11px] text-zinc-500" title={p.name}>
+                  {p.name}
+                </p>
+                <Button size="sm" variant="ghost" className="mt-1 w-full" disabled={!connected} onClick={() => sendPast(p)}>
+                  <Icon d={ICONS.play} className="h-3 w-3" /> Send
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card title="Tips" icon={<Icon d={ICONS.sparkle} className="h-5 w-5" />}>
         <ul className="space-y-2 text-sm text-zinc-400">

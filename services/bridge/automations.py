@@ -200,8 +200,12 @@ def _weather_icon_image(code: int, is_day: bool) -> Image.Image:
 
 
 def render_weather_png(weather: dict[str, Any], accent: tuple[int, int, int] = (255, 255, 255)) -> bytes:
-    """Compose a 32x32 weather image: icon on top, temperature on the bottom."""
-    img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+    """Compose a 32x32 RGB weather image: icon on top, temperature on the bottom.
+
+    NOTE: must be plain RGB (no alpha channel) - the device firmware's PNG
+    decoder garbles RGBA images into scattered pixels.
+    """
+    img = Image.new("RGB", (32, 32), (0, 0, 0))
     d = ImageDraw.Draw(img)
 
     code = int(weather.get("weather_code") or 0)
@@ -231,9 +235,8 @@ def render_weather_png(weather: dict[str, Any], accent: tuple[int, int, int] = (
                                 fill=accent,
                             )
         x += 5 * cell + cell
-    out = img.resize((64, 64), Image.NEAREST)
     buf = __import__("io").BytesIO()
-    out.save(buf, format="PNG")
+    img.save(buf, format="PNG")
     return buf.getvalue()
 
 
@@ -262,6 +265,7 @@ class Automation:
         }
         self._task: asyncio.Task | None = None
         self._stopping = False
+        self._stock_cache: dict[str, Any] = {"key": None, "quotes": [], "fetched": 0.0, "idx": 0}
 
     # ------------------------------------------------------------- lifecycle
 
@@ -305,6 +309,7 @@ class Automation:
         self.playlist = []
         self.enabled = enabled
         self.status["enabled"] = enabled
+        self._reset_caches()
         asyncio.get_running_loop().create_task(self._save())
         log.info("automation: explicit program %s", program.get("type"))
 
@@ -313,6 +318,7 @@ class Automation:
         self.playlist = playlist
         self.enabled = enabled
         self.status["enabled"] = enabled
+        self._reset_caches()
         asyncio.get_running_loop().create_task(self._save())
         log.info("automation: playlist with %d entries", len(playlist))
 
@@ -320,6 +326,9 @@ class Automation:
         self.enabled = enabled
         self.status["enabled"] = enabled
         asyncio.get_running_loop().create_task(self._save())
+
+    def _reset_caches(self) -> None:
+        self._stock_cache = {"key": None, "quotes": [], "fetched": 0.0, "idx": 0}
 
     def disable(self) -> None:
         self.enabled = False
@@ -383,7 +392,8 @@ class Automation:
         if kind == "weather":
             return max(60, int(cfg.get("interval", 30)) * 60)
         if kind == "stocks":
-            return max(60, int(cfg.get("interval", 10)) * 60)
+            # rotate one symbol at a time so short strings never get cut off
+            return max(5, 6)
         if kind == "slideshow":
             return max(5, int(cfg.get("interval", 20)))
         if kind == "clock":
@@ -438,21 +448,33 @@ class Automation:
             b64 = base64.b64encode(png).decode()
             return await self.runner("image", {"image_base64": b64, "_automation": kind})
         if kind == "stocks":
-            quotes = await fetch_quotes([str(s).strip() for s in cfg.get("symbols", []) if str(s).strip()])
-            parts = []
-            for q in quotes:
-                if q.get("ok"):
-                    sign = "+" if q["change"] >= 0 else ""
-                    parts.append(f"{q['symbol']} {q['price']:.2f} {sign}{q['change']}%")
-                else:
-                    parts.append(f"{q['symbol']} n/a")
-            line = "  |  ".join(parts) if parts else "no symbols"
+            symbols = [str(s).strip().upper() for s in cfg.get("symbols", []) if str(s).strip()][:4]
+            if not symbols:
+                raise ValueError("no symbols")
+            refresh_every = max(1, int(cfg.get("interval", 10))) * 60
+            key = json.dumps(symbols, sort_keys=True)
+            cache = self._stock_cache
+            if cache.get("key") != key or time.time() - cache.get("fetched", 0.0) >= refresh_every:
+                quotes = await fetch_quotes(symbols)
+                cache["key"] = key
+                cache["quotes"] = quotes
+                cache["fetched"] = time.time()
+                cache["idx"] = 0
+            else:
+                quotes = cache["quotes"]
+                cache["idx"] = (cache.get("idx", 0) + 1) % max(1, len(quotes))
+            quote = quotes[cache.get("idx", 0) % max(1, len(quotes))]
+            if quote.get("ok"):
+                sign = "+" if quote["change"] >= 0 else ""
+                line = f"{quote['symbol']} {sign}{quote['change']}%"
+            else:
+                line = f"{quote['symbol']} n/a"
             return await self.runner(
                 "text",
                 {
                     "text": line,
                     "mode": 1,
-                    "speed": 95,
+                    "speed": 60,
                     "size": 16,
                     "color": str(cfg.get("color", "#FFFFFF")),
                     "color_mode": 1,
@@ -483,17 +505,35 @@ class Automation:
     def media_dir(self) -> Path:
         return self.state_path.parent / "media"
 
+    MAX_MEDIA = 4
+
     def add_media(self, data: bytes, name: str) -> dict[str, Any]:
+        import io
+
+        if len(self.list_media()) >= self.MAX_MEDIA:
+            raise ValueError(f"photo frame is full ({self.MAX_MEDIA} photos) - remove one first")
         self.media_dir.mkdir(parents=True, exist_ok=True)
         clean = "".join(ch for ch in Path(name).name if ch.isalnum() or ch in ".-_").strip()
         if not clean:
             raise ValueError("invalid media name")
         if not Path(clean).suffix:
             clean += ".png"
+        if not clean.lower().endswith(".png"):
+            clean = Path(clean).stem + ".png"
+        try:
+            with Image.open(io.BytesIO(data)) as img:
+                img = img.convert("RGB")
+                if img.size != (32, 32):
+                    img = img.resize((32, 32), Image.NEAREST)
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                normalized = buf.getvalue()
+        except Exception:
+            raise ValueError("file is not a valid image")
         path = self.media_dir / clean
-        path.write_bytes(data)
-        log.info("media added: %s (%d bytes)", clean, len(data))
-        return {"name": clean, "size": len(data), "count": len(self.list_media())}
+        path.write_bytes(normalized)
+        log.info("media added: %s (%d bytes)", clean, len(normalized))
+        return {"name": clean, "size": len(normalized), "count": len(self.list_media())}
 
     def remove_media(self, name: str) -> dict[str, Any]:
         path = self.media_dir / Path(name).name

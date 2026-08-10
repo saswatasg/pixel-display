@@ -140,7 +140,7 @@ async def action_media_add(request: Request, _: None = Depends(require_key)) -> 
         if file is None:
             raise HTTPException(status_code=400, detail="multipart upload requires a 'file' field")
         data = await file.read()
-        name = str(form.get("name") or "")
+        name = str(form.get("name") or "") or str(getattr(file, "filename", "") or "")
     else:
         data = await _receive_upload_bytes(request, ("file_base64",))
         name = request.query_params.get("name") or ""

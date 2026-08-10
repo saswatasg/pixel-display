@@ -36,6 +36,7 @@ from idotmatrix import (
     Scoreboard,
     Text,
 )
+from PIL import Image as PilImage
 
 from config import Config
 from automations import Automation
@@ -257,6 +258,9 @@ class DeviceManager:
             tmp.write(data)
             path = tmp.name
         try:
+            # Firmware PNG decoder garbles RGBA - normalize to plain RGB.
+            with PilImage.open(path) as im:
+                im.convert("RGB").save(path)
             self._require_connection()
             await self.modules["image"].setMode(1)  # enter DIY draw mode
             result = await self.modules["image"].uploadProcessed(path, self.cfg.display_size)
@@ -453,7 +457,7 @@ class DeviceManager:
         program = {
             "type": "stocks",
             "config": {
-                "symbols": symbols[:12],
+                "symbols": symbols[:4],
                 "interval": interval,
                 "color": str(payload.get("color", "#FFFFFF")),
             },
@@ -465,7 +469,7 @@ class DeviceManager:
             "queued": True,
             "enabled": True,
             "program": "stocks",
-            "symbols": symbols[:12],
+            "symbols": symbols[:4],
             "automation": self.automation.status,
         }
 

@@ -22,8 +22,9 @@ async function forward(action: string, body: FormData | Record<string, unknown>)
       json = { error: text.slice(0, 200) };
     }
     if (!res.ok) {
+      const detail = json && typeof json === "object" && "detail" in json ? String((json as { detail: unknown }).detail) : "";
       return NextResponse.json(
-        { ok: false, sent: false, action, error: "bridge error: " + res.status },
+        { ok: false, sent: false, action, error: detail || "bridge error: " + res.status },
         { status: 502 },
       );
     }
