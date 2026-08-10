@@ -2,13 +2,14 @@
 
 import { ICONS, Icon, type IconName } from "./ui";
 
-export type Tab = "home" | "text" | "image" | "clock" | "more";
+export type Tab = "home" | "text" | "image" | "clock" | "weather" | "more";
 
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: "home", label: "Home", icon: "home" },
   { id: "text", label: "Text", icon: "text" },
   { id: "image", label: "Image", icon: "image" },
   { id: "clock", label: "Clock", icon: "clock" },
+  { id: "weather", label: "Weather", icon: "sun" },
   { id: "more", label: "More", icon: "more" },
 ];
 

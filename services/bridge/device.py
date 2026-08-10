@@ -17,6 +17,7 @@ import asyncio
 import base64
 import binascii
 import logging
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -37,6 +38,7 @@ from idotmatrix import (
 )
 
 from config import Config
+from automations import Automation
 
 log = logging.getLogger("pixelbridge.device")
 
@@ -95,6 +97,7 @@ class DeviceManager:
         self._started_at: float = time.time()
         self._tasks: list[asyncio.Task] = []
         self._stopping = False
+        self.automation = Automation(Path("automation.json"), self.submit)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -102,10 +105,12 @@ class DeviceManager:
         self._tasks = [
             asyncio.create_task(self._reconnect_loop(), name="reconnect"),
             asyncio.create_task(self._worker(), name="worker"),
+            asyncio.create_task(self.automation.start(), name="automation"),
         ]
 
     async def stop(self) -> None:
         self._stopping = True
+        await self.automation.stop()
         for task in self._tasks:
             task.cancel()
         for task in self._tasks:
@@ -177,13 +182,16 @@ class DeviceManager:
         while not self._stopping:
             action, payload, future = await self.queue.get()
             try:
-                future.set_result(await self._execute(action, payload))
+                result = await self._execute(action, payload)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                future.set_result(
-                    {"ok": False, "sent": False, "action": action, "error": str(exc)}
-                )
+                result = {"ok": False, "sent": False, "action": action, "error": str(exc)}
+            try:
+                future.set_result(result)
+            except (asyncio.InvalidStateError, RuntimeError):
+                # caller already gave up (submit timeout) - drop the result
+                pass
 
     async def _execute(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         handlers: dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = {
@@ -201,6 +209,14 @@ class DeviceManager:
             "scoreboard": self._act_scoreboard,
             "sync-time": self._act_sync_time,
             "reset": self._act_reset,
+            "weather": self._act_weather,
+            "stocks": self._act_stocks,
+            "slideshow": self._act_slideshow,
+            "slideshow-next": self._act_slideshow_next,
+            "scene": self._act_scene,
+            "automation-off": self._act_automation_off,
+            "media-add": self._act_media_add,
+            "media-remove": self._act_media_remove,
         }
         if action not in handlers:
             raise ValueError(f"unknown action: {action}")
@@ -397,6 +413,141 @@ class DeviceManager:
             raise RuntimeError("library failed to reset device")
         return {"sent": True}
 
+    # -------------------------------------------------------------- automations
+
+    async def _act_weather(self, payload: dict[str, Any]) -> dict[str, Any]:
+        lat = float(payload.get("lat") or payload.get("latitude"))
+        lon = float(payload.get("lon") or payload.get("longitude"))
+        if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+            raise ValueError("invalid lat/lon")
+        unit = "f" if str(payload.get("unit", "c")).lower() == "f" else "c"
+        interval = max(15, min(360, int(payload.get("interval", 30))))
+        name = str(payload.get("name", "")).strip()
+        program = {
+            "type": "weather",
+            "config": {
+                "lat": lat,
+                "lon": lon,
+                "unit": unit,
+                "interval": interval,
+                "color": str(payload.get("color", "#FFFFFF")),
+                "name": name,
+            },
+        }
+        self.automation.set_explicit(program)
+        asyncio.create_task(self.automation.run_now())
+        return {
+            "sent": True,
+            "queued": True,
+            "enabled": True,
+            "program": "weather",
+            "city": name,
+            "automation": self.automation.status,
+        }
+
+    async def _act_stocks(self, payload: dict[str, Any]) -> dict[str, Any]:
+        symbols = [str(s).strip().upper() for s in payload.get("symbols", []) if str(s).strip()]
+        if not symbols:
+            raise ValueError("symbols must not be empty")
+        interval = max(5, min(120, int(payload.get("interval", 10))))
+        program = {
+            "type": "stocks",
+            "config": {
+                "symbols": symbols[:12],
+                "interval": interval,
+                "color": str(payload.get("color", "#FFFFFF")),
+            },
+        }
+        self.automation.set_explicit(program)
+        asyncio.create_task(self.automation.run_now())
+        return {
+            "sent": True,
+            "queued": True,
+            "enabled": True,
+            "program": "stocks",
+            "symbols": symbols[:12],
+            "automation": self.automation.status,
+        }
+
+    async def _act_slideshow(self, payload: dict[str, Any]) -> dict[str, Any]:
+        media = self.automation.list_media()
+        if not media:
+            raise ValueError("photo frame is empty — upload images first")
+        interval = max(5, min(3600, int(payload.get("interval", 20))))
+        program = {
+            "type": "slideshow",
+            "config": {
+                "interval": interval,
+                "shuffle": bool(payload.get("shuffle", False)),
+                "index": int(payload.get("index", 0)),
+            },
+        }
+        self.automation.set_explicit(program)
+        asyncio.create_task(self.automation.run_now())
+        return {
+            "sent": True,
+            "queued": True,
+            "enabled": True,
+            "program": "slideshow",
+            "photos": len(media),
+            "automation": self.automation.status,
+        }
+
+    async def _act_slideshow_next(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.automation.enabled or not (self.automation.explicit or {}).get("type") == "slideshow":
+            raise ValueError("slideshow is not active")
+        cfg = self.automation.explicit.setdefault("config", {})
+        cfg["index"] = int(cfg.get("index", 0)) + 1
+        asyncio.create_task(self.automation.run_now())
+        return {"sent": True, "queued": True, "program": "slideshow", "automation": self.automation.status}
+
+    async def _act_scene(self, payload: dict[str, Any]) -> dict[str, Any]:
+        playlist = payload.get("playlist")
+        if playlist is not None:
+            if not isinstance(playlist, list) or not playlist:
+                raise ValueError("scene playlist must be a non-empty list of {start,end,program}")
+            clean: list[dict[str, Any]] = []
+            for entry in playlist:
+                start = str(entry.get("start", "")).strip()
+                end = str(entry.get("end", "")).strip()
+                program = str(entry.get("program", "")).strip()
+                if not re.fullmatch(r"\d{2}:\d{2}", start) or not re.fullmatch(r"\d{2}:\d{2}", end):
+                    raise ValueError("scene times must use HH:MM")
+                if program not in (
+                    "weather", "stocks", "slideshow", "clock", "effect", "text",
+                ):
+                    raise ValueError(f"unknown scene program: {program}")
+                clean.append({"start": start, "end": end, "program": program, "config": entry.get("config") or {}})
+            self.automation.set_playlist(clean, enabled=bool(payload.get("enabled", True)))
+            asyncio.create_task(self.automation.run_now())
+            return {
+                "sent": True,
+                "queued": True,
+                "enabled": True,
+                "program": "scene",
+                "entries": len(clean),
+                "automation": self.automation.status,
+            }
+        self.automation.set_enabled(bool(payload.get("enabled", False)))
+        return {"sent": True, "enabled": self.automation.enabled, "automation": self.automation.status}
+
+    async def _act_automation_off(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.automation.disable()
+        return {"sent": True, "enabled": False, "automation": self.automation.status}
+
+    async def _act_media_add(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = self._extract_bytes(payload)
+        if data is None:
+            raise ValueError("media must be provided as 'file_base64' or a file upload")
+        name = str(payload.get("name", "")).strip() or "photo.png"
+        return self.automation.add_media(data, name)
+
+    async def _act_media_remove(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            raise ValueError("name must not be empty")
+        return self.automation.remove_media(name)
+
     # ----------------------------------------------------------------- helpers
 
     @staticmethod
@@ -423,6 +574,8 @@ class DeviceManager:
                 "lastError": self.status["lastError"],
                 "lastConnectedAt": self.status["lastConnectedAt"],
             },
+            "automation": self.automation.status,
+            "media": {"count": len(self.automation.list_media())},
         }
 
     def get_capabilities(self) -> dict[str, Any]:
@@ -571,5 +724,72 @@ class DeviceManager:
                 },
                 "sync-time": {"title": "Sync device clock", "payloadSchema": {"type": "object"}},
                 "reset": {"title": "Reset device", "payloadSchema": {"type": "object"}},
+                "weather": {
+                    "title": "Scheduled weather",
+                    "payloadSchema": {
+                        "type": "object",
+                        "properties": {
+                            "lat": {"type": "number"},
+                            "lon": {"type": "number"},
+                            "name": {"type": "string"},
+                            "unit": {"type": "string", "enum": ["c", "f"]},
+                            "interval": {"type": "integer", "minimum": 15, "maximum": 360},
+                            "color": {"type": "string"},
+                        },
+                        "required": ["lat", "lon"],
+                    },
+                },
+                "stocks": {
+                    "title": "Stock ticker",
+                    "payloadSchema": {
+                        "type": "object",
+                        "properties": {
+                            "symbols": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                            "interval": {"type": "integer", "minimum": 5, "maximum": 120},
+                            "color": {"type": "string"},
+                        },
+                        "required": ["symbols"],
+                    },
+                },
+                "slideshow": {
+                    "title": "Photo frame",
+                    "payloadSchema": {
+                        "type": "object",
+                        "properties": {
+                            "interval": {"type": "integer", "minimum": 5, "maximum": 3600},
+                            "shuffle": {"type": "boolean"},
+                        },
+                    },
+                },
+                "scene": {
+                    "title": "Time-of-day scenes",
+                    "payloadSchema": {
+                        "type": "object",
+                        "properties": {
+                            "enabled": {"type": "boolean"},
+                            "playlist": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "start": {"type": "string", "pattern": "^\\d{2}:\\d{2}$"},
+                                        "end": {"type": "string", "pattern": "^\\d{2}:\\d{2}$"},
+                                        "program": {"type": "string", "enum": ["weather", "stocks", "slideshow", "clock", "effect", "text"]},
+                                        "config": {"type": "object"},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                "media-add": {"title": "Add photo to frame", "payloadSchema": {"type": "object", "properties": {"file_base64": {"type": "string"}}}},
+                "media-remove": {
+                    "title": "Remove photo from frame",
+                    "payloadSchema": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                        "required": ["name"],
+                    },
+                },
             },
         }

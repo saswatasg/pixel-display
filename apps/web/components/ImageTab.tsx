@@ -15,6 +15,7 @@ interface Props {
 export function ImageTab({ connected, onSend, onToast }: Props) {
   const [fileInfo, setFileInfo] = useState<{ file: File | null }>({ file: null });
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
 
   const file = fileInfo.file;
@@ -34,6 +35,18 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
       else onToast(res.error ?? "Upload failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveToFrame() {
+    if (!file || isGif) return;
+    setSaving(true);
+    try {
+      const res = await sendFile("media-add", file);
+      if (res.ok) onToast("Saved to photo frame");
+      else onToast(res.error ?? "Save failed");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -97,6 +110,11 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
               <Button onClick={send} disabled={busy || !connected}>
                 {busy ? "Uploading…" : `Send ${isGif ? "GIF" : "image"}`}
               </Button>
+              {!isGif && (
+                <Button variant="ghost" onClick={saveToFrame} disabled={saving || !connected} title="Keep in the photo frame for slideshows">
+                  {saving ? "Saving…" : "Save to frame"}
+                </Button>
+              )}
               <Button variant="ghost" onClick={() => pick(null)}>
                 Clear
               </Button>

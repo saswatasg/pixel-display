@@ -20,3 +20,4 @@ apps/web/.env.local
 # misc
 .DS_Store
 *.log
+*.tsbuildinfo

@@ -1,3 +1,18 @@
+export interface AutomationStatus {
+  enabled: boolean;
+  program: string | null;
+  lastRunAt: number | null;
+  nextRunAt: number | null;
+  lastResult: "ok" | "error" | null;
+  error: string | null;
+}
+
+export interface MediaItem {
+  name: string;
+  size: number;
+  addedAt: number;
+}
+
 export interface BridgeStatus {
   bridge: "online";
   uptimeSec: number;
@@ -11,6 +26,26 @@ export interface BridgeStatus {
     lastError: string | null;
     lastConnectedAt: number | null;
   };
+  automation?: AutomationStatus;
+  media?: { count: number };
+}
+
+export interface GeoResult {
+  name: string;
+  admin1?: string;
+  country?: string;
+  lat: number;
+  lon: number;
+}
+
+export interface WeatherData {
+  temperature: number | null;
+  feels_like: number | null;
+  humidity: number | null;
+  weather_code: number;
+  wind_speed: number | null;
+  is_day: boolean;
+  unit: "c" | "f";
 }
 
 export interface AppStatus {

@@ -130,6 +130,33 @@ async def action_gif(request: Request, _: None = Depends(require_key)) -> dict[s
     return await run_action("gif", {"gif_base64": __import__("base64").b64encode(data).decode()})
 
 
+@app.post("/actions/media-add")
+async def action_media_add(request: Request, _: None = Depends(require_key)) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    name = ""
+    if request.headers.get("content-type", "").startswith("multipart/form-data"):
+        form = await request.form()
+        file = form.get("file")
+        if file is None:
+            raise HTTPException(status_code=400, detail="multipart upload requires a 'file' field")
+        data = await file.read()
+        name = str(form.get("name") or "")
+    else:
+        data = await _receive_upload_bytes(request, ("file_base64",))
+        name = request.query_params.get("name") or ""
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="upload exceeds 5 MB")
+    payload["file_base64"] = __import__("base64").b64encode(data).decode()
+    if name:
+        payload["name"] = name
+    return await run_action("media-add", payload)
+
+
+@app.get("/actions/media-list")
+async def action_media_list(_: None = Depends(require_key)) -> dict[str, Any]:
+    return {"ok": True, "media": manager.automation.list_media()}
+
+
 @app.post("/actions/{action}")
 async def action_generic(action: str, request: Request, _: None = Depends(require_key)) -> dict[str, Any]:
     try:

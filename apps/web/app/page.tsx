@@ -10,6 +10,7 @@ import { TextTab } from "@/components/TextTab";
 import { ImageTab } from "@/components/ImageTab";
 import { ClockTab } from "@/components/ClockTab";
 import { MoreTab } from "@/components/MoreTab";
+import { WeatherTab } from "@/components/WeatherTab";
 import { Skeleton, Toast, Wordmark, type ToastType } from "@/components/ui";
 
 export default function Page() {
@@ -73,6 +74,7 @@ export default function Page() {
         {tab === "text" && <TextTab connected={connected} onSend={onSend} onToast={showToast} />}
         {tab === "image" && <ImageTab connected={connected} onSend={onSend} onToast={showToast} />}
         {tab === "clock" && <ClockTab connected={connected} onSend={onSend} onToast={showToast} />}
+        {tab === "weather" && <WeatherTab connected={connected} onSend={onSend} onToast={showToast} />}
         {tab === "more" && <MoreTab connected={connected} onSend={onSend} onToast={showToast} />}
       </div>
 

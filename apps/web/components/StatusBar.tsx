@@ -34,6 +34,8 @@ export function StatusBar({ status }: { status: AppStatus | null }) {
     pulse = true;
   }
 
+  const automation = status?.bridge?.automation;
+
   const ring = {
     good: "border-emerald-400/25 bg-emerald-500/10",
     warn: "border-amber-400/25 bg-amber-500/10",
@@ -42,18 +44,38 @@ export function StatusBar({ status }: { status: AppStatus | null }) {
   }[level];
 
   return (
-    <span
-      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${ring}`}
-      title={label}
-    >
-      <span className="relative flex h-2 w-2">
-        {pulse && status && (
-          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${dotClass} opacity-60`} />
-        )}
-        <span className={`relative inline-flex h-2 w-2 rounded-full ${dotClass}`} />
-      </span>
-      <span className={level === "good" ? "text-emerald-300" : level === "bad" ? "text-red-300" : "text-zinc-300"}>
-        {label}
+    <span className="flex items-center gap-1.5">
+      {automation?.enabled && (
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] font-medium text-amber-300"
+          title={automation.error ?? "Automation active"}
+        >
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-60" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-400" />
+          </span>
+          {automation.program === "weather"
+            ? "weather"
+            : automation.program === "stocks"
+              ? "ticker"
+              : automation.program === "slideshow"
+                ? "frame"
+                : "scenes"}
+        </span>
+      )}
+      <span
+        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium ${ring}`}
+        title={label}
+      >
+        <span className="relative flex h-2 w-2">
+          {pulse && status && (
+            <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${dotClass} opacity-60`} />
+          )}
+          <span className={`relative inline-flex h-2 w-2 rounded-full ${dotClass}`} />
+        </span>
+        <span className={level === "good" ? "text-emerald-300" : level === "bad" ? "text-red-300" : "text-zinc-300"}>
+          {label}
+        </span>
       </span>
     </span>
   );

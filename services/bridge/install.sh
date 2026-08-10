@@ -23,7 +23,10 @@ C_SRC="$(mktemp /tmp/pixelbridge.XXXXXX.c)"
 trap 'rm -f "$C_SRC"' EXIT
 
 echo "==> Deploying bridge files to $RUN_DIR"
-rsync -a --delete --exclude .venv --exclude logs --exclude __pycache__ "$REPO_DIR/" "$RUN_DIR/"
+rsync -a --delete \
+    --exclude .venv --exclude logs --exclude __pycache__ --exclude media \
+    "$REPO_DIR/" "$RUN_DIR/"
+mkdir -p "$RUN_DIR/media" "$RUN_DIR/logs"
 
 echo "==> Ensuring Python venv"
 if [ ! -x "$RUN_DIR/.venv/bin/python" ]; then
