@@ -35,6 +35,11 @@ log = logging.getLogger("pixelbridge.automation")
 # any machine timezone and without any tz database installed.
 IST = timezone(timedelta(hours=5, minutes=30))
 
+# Only fire the wake while we're still inside this window past the target
+# time; enabling wake after it has already passed schedules for tomorrow
+# instead of retro-firing and hijacking whatever is on the display.
+WAKE_GRACE_MIN = 15
+
 WAKE_DEFAULT: dict[str, Any] = {
     "enabled": True,
     "time": "08:00",
@@ -458,6 +463,16 @@ class Automation:
         if isinstance(payload.get("config"), dict):
             self.wake["config"] = payload["config"]
         self._sync_wake_status()
+        # If the wake time for today has already passed (enabling at 17:53 with
+        # an 08:00 wake), don't retro-fire today — first wake is tomorrow.
+        if self.wake.get("enabled"):
+            try:
+                now = datetime.now(IST)
+                hh, mm = (int(x) for x in str(self.wake.get("time", "08:00")).split(":"))
+                if now >= now.replace(hour=hh, minute=mm, second=0, microsecond=0) + timedelta(minutes=WAKE_GRACE_MIN):
+                    self.wake["lastWake"] = now.strftime("%Y-%m-%d")
+            except Exception:  # noqa: BLE001
+                pass
         asyncio.get_running_loop().create_task(self._save())
         log.info("wake configured: %s", {k: v for k, v in self.wake.items() if k != "lastWake"})
         return {"ok": True, "wake": dict(self.status["wake"])}
@@ -472,14 +487,24 @@ class Automation:
             today = now.strftime("%Y-%m-%d")
             if now < target or self.wake.get("lastWake") == today:
                 return
+            if now >= target + timedelta(minutes=WAKE_GRACE_MIN):
+                # Missed today's window (bridge came up late or wake was just
+                # enabled after the time) - wait for tomorrow.
+                self.wake["lastWake"] = today
+                asyncio.create_task(self._save())
+                return
             log.info("wake firing at %s IST - powering display on", now.strftime("%H:%M"))
             await self.runner("screen", {"power": "on"})
-            program = self._wake_program()
-            if program is None:
-                log.warning("wake image program fell back to clock (empty photo frame)")
-                program = {"type": "clock", "config": {"style": 0, "color": "#FFFFFF", "showDate": True, "format24h": True}}
-            self.set_explicit(program, enabled=True)
-            await self.run_now()
+            # Wake just turns the display back on. If something is already
+            # scheduled (weather/ticker/slideshow) it keeps running and the
+            # wake never hijacks it; otherwise start the wake program.
+            if not self.enabled:
+                program = self._wake_program()
+                if program is None:
+                    log.warning("wake image program fell back to clock (empty photo frame)")
+                    program = {"type": "clock", "config": {"style": 0, "color": "#FFFFFF", "showDate": True, "format24h": True}}
+                self.set_explicit(program, enabled=True)
+                await self.run_now()
             self.wake["lastWake"] = today
             asyncio.create_task(self._save())
         except Exception as exc:  # noqa: BLE001

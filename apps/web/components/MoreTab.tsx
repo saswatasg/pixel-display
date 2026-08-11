@@ -815,9 +815,10 @@ function WakePanel({ connected, onSend, onToast }: Pick<Props, "connected" | "on
         </Button>
       </div>
       <p className="text-[11px] leading-relaxed text-zinc-600">
-        Runs on the bridge at {time} Indian Standard Time (IST). Works even after the display is powered off — the
-        wake turns the screen back on and shows the {program === "clock" ? "clock" : "last photo"} in the frame. The
-        screen stays off for the rest of the day until you use it again.
+        Runs on the bridge at {time} Indian Standard Time (IST), every day. When it fires, the wake turns the
+        display back on — it only starts the {program === "clock" ? "clock" : "photo frame"} if nothing was already
+        scheduled, so a running weather/ticker/slideshow is never replaced. Setting the wake after its time has
+        already passed schedules it for the next morning instead of firing immediately.
       </p>
     </div>
   );
