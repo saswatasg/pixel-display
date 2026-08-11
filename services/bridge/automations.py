@@ -19,6 +19,7 @@ import base64
 import json
 import logging
 import math
+import os
 import random
 import time
 import urllib.parse
@@ -353,6 +354,15 @@ class Automation:
         self._task: asyncio.Task | None = None
         self._stopping = False
         self._stock_cache: dict[str, Any] = {"key": None, "quotes": [], "fetched": 0.0, "idx": 0}
+        # Stale-while-revalidate: keep the last weather render for a short TTL
+        # so rapid run_now() calls (scene switches, wake) don't hammer
+        # Open-Meteo for a card that diverges only slightly.
+        self._weather_cache: dict[str, Any] = {"key": None, "data": None, "fetched": 0.0}
+        self._weather_ttl: float = 10 * 60.0
+        # Single-flight: one program render at a time. Concurrent run_now()
+        # callers (scheduled tick + set_explicit) wait on the in-flight render
+        # instead of starting a second overlapping BLE upload.
+        self._inflight: asyncio.Task | None = None
         self.wake: dict[str, Any] = dict(WAKE_DEFAULT)
         self.status["wake"] = {k: v for k, v in self.wake.items() if k != "lastWake"}
 
@@ -372,33 +382,60 @@ class Automation:
                 pass
 
     async def _save(self) -> None:
+        """Persist state atomically (temp file + rename) and keep the previous
+        good copy as `.bak` so a crash mid-write can never corrupt the only
+        copy of the user's schedule/wake settings."""
         data = {
             "enabled": self.enabled,
             "explicit": self.explicit,
             "playlist": self.playlist,
             "wake": self.wake,
         }
+        tmp = self.state_path.with_suffix(".json.tmp")
         try:
-            self.state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            if self.state_path.exists():
+                try:
+                    os.replace(self.state_path, self.state_path.with_suffix(".json.bak"))
+                except OSError:
+                    pass
+            os.replace(tmp, self.state_path)
         except Exception as exc:  # noqa: BLE001
             log.warning("failed to persist automation state: %s", exc)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     async def _load(self) -> None:
-        try:
-            if not self.state_path.exists():
+        sources = [self.state_path, self.state_path.with_suffix(".json.bak")]
+        last_error: Exception | None = None
+        for path in sources:
+            if not path.exists():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self.enabled = bool(data.get("enabled", False))
+                self.explicit = data.get("explicit")
+                self.playlist = data.get("playlist") or []
+                wake = data.get("wake")
+                if isinstance(wake, dict):
+                    self.wake.update({k: v for k, v in wake.items() if k in WAKE_DEFAULT})
+                self._sync_wake_status()
+                self.status["enabled"] = self.enabled
+                log.info(
+                    "automation resumed (from %s): enabled=%s explicit=%s playlist=%d entries",
+                    path.name,
+                    self.enabled,
+                    bool(self.explicit),
+                    len(self.playlist),
+                )
                 return
-            data = json.loads(self.state_path.read_text(encoding="utf-8"))
-            self.enabled = bool(data.get("enabled", False))
-            self.explicit = data.get("explicit")
-            self.playlist = data.get("playlist") or []
-            wake = data.get("wake")
-            if isinstance(wake, dict):
-                self.wake.update({k: v for k, v in wake.items() if k in WAKE_DEFAULT})
-            self._sync_wake_status()
-            self.status["enabled"] = self.enabled
-            log.info("automation resumed: enabled=%s explicit=%s playlist=%d entries", self.enabled, bool(self.explicit), len(self.playlist))
-        except Exception as exc:  # noqa: BLE001
-            log.warning("failed to load automation state: %s", exc)
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                log.warning("failed to load automation state from %s: %s", path.name, exc)
+        if last_error is not None:
+            log.warning("no readable automation state found; starting fresh")
 
     def _sync_wake_status(self) -> None:
         self.status["wake"] = {k: v for k, v in self.wake.items() if k != "lastWake"}
@@ -430,6 +467,7 @@ class Automation:
 
     def _reset_caches(self) -> None:
         self._stock_cache = {"key": None, "quotes": [], "fetched": 0.0, "idx": 0}
+        self._weather_cache = {"key": None, "data": None, "fetched": 0.0}
 
     def disable(self) -> None:
         self.enabled = False
@@ -527,6 +565,25 @@ class Automation:
         return {"type": "slideshow", "config": {"interval": 60, "shuffle": False, "index": 0}}
 
     async def run_now(self) -> dict[str, Any]:
+        """Render the active program, coalescing concurrent callers.
+
+        The scheduled tick, wake, and set_explicit/set_playlist each fire
+        run_now() independently; without single-flight two renders could
+        overlap on BLE. Subsequent callers await the in-flight render.
+        """
+        if self._inflight is not None and not self._inflight.done():
+            try:
+                return await asyncio.shield(self._inflight)
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": str(exc)}
+        self._inflight = asyncio.create_task(self._run_now_inner(), name="automation-run")
+        try:
+            return await self._inflight
+        finally:
+            if self._inflight and self._inflight.done():
+                self._inflight = None
+
+    async def _run_now_inner(self) -> dict[str, Any]:
         program = self._resolve()
         if not program:
             self.status["error"] = "no active program"
@@ -639,7 +696,17 @@ class Automation:
             lat = float(cfg["lat"])
             lon = float(cfg["lon"])
             unit = "f" if cfg.get("unit") == "f" else "c"
-            weather = await fetch_weather(lat, lon, unit)
+            key = f"{lat:g}|{lon:g}|{unit}"
+            cache = self._weather_cache
+            if cache.get("key") != key or time.time() - cache.get("fetched", 0.0) >= self._weather_ttl:
+                weather = await fetch_weather(lat, lon, unit)
+                cache["key"] = key
+                cache["data"] = weather
+                cache["fetched"] = time.time()
+            else:
+                # Fresh enough — reuse the last card instead of re-fetching
+                # (keeps rapid automation ticks off the free API).
+                weather = cache["data"]
             accent = _hex_to_rgb(str(cfg.get("color", "#FFFFFF")))
             city = str(cfg.get("name", "")).strip()
             png = await asyncio.to_thread(render_weather_png, weather, accent, city)

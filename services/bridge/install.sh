@@ -23,10 +23,18 @@ C_SRC="$(mktemp /tmp/pixelbridge.XXXXXX.c)"
 trap 'rm -f "$C_SRC"' EXIT
 
 echo "==> Deploying bridge files to $RUN_DIR"
+# automation.json holds the scheduled program + wake state (plus its .bak/.tmp
+# siblings written atomically by the bridge); never wipe them on a reinstall
+# (rsync --delete would otherwise delete them since they're not in the repo,
+# silently dropping the user's schedule and wake settings).
 rsync -a --delete \
     --exclude .venv --exclude logs --exclude __pycache__ --exclude media \
+    --exclude 'automation.json' --exclude 'automation.json.bak' --exclude 'automation.json.tmp' \
     "$REPO_DIR/" "$RUN_DIR/"
 mkdir -p "$RUN_DIR/media" "$RUN_DIR/logs"
+# Bridge key + automation state are the only secrets/state on disk; keep the
+# files user-readable only.
+chmod 600 "$RUN_DIR/config.json" "$RUN_DIR/automation.json" 2>/dev/null || true
 
 echo "==> Ensuring Python venv"
 if [ ! -x "$RUN_DIR/.venv/bin/python" ]; then

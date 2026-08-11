@@ -37,6 +37,29 @@ from idotmatrix import (
     Text,
 )
 from PIL import Image as PilImage
+from collections import deque
+
+
+class RateLimitedError(Exception):
+    """Raised when too many actions arrive or the action queue is full."""
+
+
+class _RateLimit:
+    """Tiny sliding-window rate limiter (per process)."""
+
+    def __init__(self, max_hits: int, window: float) -> None:
+        self.max_hits = max_hits
+        self.window = window
+        self.hits: deque[float] = deque()
+
+    def allow(self) -> bool:
+        now = time.time()
+        while self.hits and self.hits[0] < now - self.window:
+            self.hits.popleft()
+        if len(self.hits) >= self.max_hits:
+            return False
+        self.hits.append(now)
+        return True
 
 from config import Config
 from automations import Automation
@@ -119,7 +142,8 @@ class DeviceManager:
             "effect": EffectWithSpeed(),
             "scoreboard": Scoreboard(),
         }
-        self.queue: asyncio.Queue = asyncio.Queue()
+        self.queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+        self._rate: _RateLimit = _RateLimit(max_hits=60, window=10.0)
         self.status: dict[str, Any] = {
             "connected": False,
             "address": self.cfg.address if self.cfg.address != "auto" else None,
@@ -136,6 +160,10 @@ class DeviceManager:
         # forever) would otherwise block the worker and poison every queued
         # action. Cap each action and reset the BLE client on a wedge.
         self._action_timeout: float = 45.0
+        # media-sync downloads images over the network; it runs in the
+        # background so the action worker (and the caller's request) isn't
+        # held up. Track it so concurrent syncs coalesce into one.
+        self._media_sync_task: asyncio.Task | None = None
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -157,11 +185,19 @@ class DeviceManager:
             except asyncio.CancelledError:
                 pass
         try:
-            await self.conn.disconnect()
+            await asyncio.wait_for(self.conn.disconnect(), timeout=5)
         except Exception:  # noqa: BLE001
             pass
 
     # ------------------------------------------------------------- connection
+
+    # Hard cap on the reconnect backoff so a long outage never parks us for
+    # minutes after the radio comes back.
+    _RECONNECT_CAP_SEC = 60.0
+    # macOS CoreBluetooth raises messages like "Bluetooth is not powered on"
+    # when the radio is off; a fresh client won't help then, so back off hard
+    # instead of churning the BLE stack every reconnectInterval.
+    _BLE_OFF_HINTS = ("not powered", "powered off", "bluetooth is off", "not available")
 
     @property
     def is_connected(self) -> bool:
@@ -170,8 +206,9 @@ class DeviceManager:
     async def _reconnect_loop(self) -> None:
         failed_streak = 0
         while not self._stopping:
-            try:
-                if not self.is_connected:
+            delay = float(self.cfg.reconnect_interval)
+            if not self.is_connected:
+                try:
                     # macOS CoreBluetooth can hang a connect() forever after a
                     # drop; a timeout turns the hang into a counted failure so
                     # the fresh-BleakClient recovery below can kick in.
@@ -186,23 +223,35 @@ class DeviceManager:
                         self.status["lastError"] = None
                         failed_streak = 0
                         log.info("display connected: %s", self.conn.address)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                self.status["connected"] = False
-                self.status["lastError"] = str(exc)
-                failed_streak += 1
-                if failed_streak >= 3:
-                    # macOS CoreBluetooth can wedge after a drop; a fresh
-                    # BleakClient gets a new CBCentralManager and recovers.
-                    try:
-                        await self.conn.disconnect()
-                    except Exception:  # noqa: BLE001
-                        pass
-                    self.conn.client = None
-                    failed_streak = 0
-                log.warning("connection attempt failed: %s", exc)
-            await asyncio.sleep(self.cfg.reconnect_interval)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    self.status["connected"] = False
+                    self.status["lastError"] = str(exc)
+                    failed_streak += 1
+                    msg = str(exc).lower()
+                    if any(hint in msg for hint in self._BLE_OFF_HINTS):
+                        # Radio is powered down — fresh clients can't help, so
+                        # wait the full 60s and keep retrying quietly.
+                        delay = self._RECONNECT_CAP_SEC
+                    else:
+                        delay = min(
+                            float(self.cfg.reconnect_interval) * (2 ** min(failed_streak - 1, 4)),
+                            self._RECONNECT_CAP_SEC,
+                        )
+                        if failed_streak >= 3:
+                            # macOS CoreBluetooth can wedge after a drop; a
+                            # fresh BleakClient gets a new CBCentralManager and
+                            # recovers. Guard disconnect() so a wedged radio
+                            # never hangs the reconnect loop itself.
+                            try:
+                                await asyncio.wait_for(self.conn.disconnect(), timeout=5)
+                            except Exception:  # noqa: BLE001
+                                pass
+                            self.conn.client = None
+                            failed_streak = 0
+                    log.warning("connection attempt failed (retry in %.0fs): %s", delay, exc)
+            await asyncio.sleep(delay)
 
     def _require_connection(self) -> None:
         if not self.is_connected:
@@ -221,6 +270,10 @@ class DeviceManager:
 
     async def submit(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Queue an action and wait for it to run (timeout: 60s)."""
+        if not self._rate.allow():
+            raise RateLimitedError()
+        if self.queue.full():
+            raise RateLimitedError("action queue is full")
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         await self.queue.put((action, payload, future))
         await asyncio.wait_for(future, 60)
@@ -243,7 +296,16 @@ class DeviceManager:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                result = {"ok": False, "sent": False, "action": action, "error": str(exc)}
+                # Validation/malformed-input errors (ValueError) are the
+                # caller's fault -> the bridge replies 400; anything else
+                # (BLE/library failures) is a bridge fault -> 502/504.
+                result = {
+                    "ok": False,
+                    "sent": False,
+                    "action": action,
+                    "error": str(exc),
+                    "client_error": isinstance(exc, ValueError),
+                }
             try:
                 future.set_result(result)
             except (asyncio.InvalidStateError, RuntimeError):
@@ -253,9 +315,10 @@ class DeviceManager:
     async def _reset_client(self) -> None:
         """Drop the BLE connection and clear the client so the reconnect loop
         makes a fresh BleakClient (new CBCentralManager) - recovers macOS
-        CoreBluetooth wedges."""
+        CoreBluetooth wedges. disconnect() is itself fallible/blocking, so it
+        gets a short timeout - a wedged radio must never stall the worker."""
         try:
-            await self.conn.disconnect()
+            await asyncio.wait_for(self.conn.disconnect(), timeout=5)
         except Exception:  # noqa: BLE001
             pass
         self.conn.client = None
@@ -644,9 +707,21 @@ class DeviceManager:
 
     async def _act_media_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         web_url = str(payload.get("webUrl") or self.cfg.web_url or "").strip()
-        result = await self.automation.sync_media(web_url)
-        result["webUrl"] = web_url
-        return result
+        if self._media_sync_task and not self._media_sync_task.done():
+            return {"ok": True, "queued": True, "already_syncing": True, "webUrl": web_url}
+        self._media_sync_task = asyncio.create_task(
+            self._sync_media_background(web_url), name="media-sync"
+        )
+        return {"ok": True, "queued": True, "webUrl": web_url}
+
+    async def _sync_media_background(self, web_url: str) -> None:
+        """Fetch + reconcile the cloud photo-frame catalog off the action
+        worker; failures are logged, never raised back into the queue."""
+        try:
+            result = await self.automation.sync_media(web_url)
+            log.info("media-sync finished: %s", result)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("media-sync failed: %s", exc)
 
     async def _act_wake(self, payload: dict[str, Any]) -> dict[str, Any]:
         result = self.automation.set_wake(payload)

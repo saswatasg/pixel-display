@@ -15,21 +15,47 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import time
+from collections import deque
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import Config
-from device import ANIMATION_STYLES, DeviceManager
+from device import ANIMATION_STYLES, DeviceManager, RateLimitedError
 
+log = logging.getLogger("pixelbridge")
+
+# Max volume source is this bridge's own loggers (automation ticks, reconnect
+# attempts); rotate those into a bounded set of files instead of growing
+# `logs/app-bridge.log` forever. uvicorn's access/error lines still go to
+# stdout/stderr (captured by the launchd wrapper).
+def _setup_logging() -> None:
+    log_dir = Path(__file__).resolve().parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(
+        log_dir / "pixelbridge.log",
+        maxBytes=2 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    bridge_logger = logging.getLogger("pixelbridge")
+    bridge_logger.setLevel(logging.INFO)
+    if not bridge_logger.handlers:
+        bridge_logger.addHandler(handler)
+
+
+_setup_logging()
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-log = logging.getLogger("pixelbridge")
 
 config = Config()
 manager = DeviceManager(config)
@@ -62,17 +88,23 @@ app.add_middleware(
 
 
 def require_key(x_api_key: str = Header(default="")) -> None:
-    if x_api_key != config.api_key:
+    if not secrets.compare_digest(x_api_key, config.api_key):
         raise HTTPException(status_code=401, detail="invalid or missing X-API-Key")
 
 
 async def run_action(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         result = await manager.submit(action, payload)
+    except RateLimitedError:
+        raise HTTPException(status_code=429, detail="too many requests — try again in a moment")
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="action timed out")
     if not result.get("ok"):
-        raise HTTPException(status_code=502, detail=result.get("error") or "action failed")
+        client_error = bool(result.pop("client_error", False))
+        raise HTTPException(
+            status_code=400 if client_error else 502,
+            detail=result.get("error") or "action failed",
+        )
     return result
 
 

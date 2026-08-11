@@ -23,7 +23,9 @@ DEFAULT_CONFIG = {
     "displaySize": 32,
     "reconnectIntervalSec": 5,
     "webUrl": "https://pixel-display-controller.vercel.app",
-    "allowedOrigins": ["*"],
+    # CORS only matters when a browser can reach the bridge; restrict to the
+    # web app + local dev. The bridge key remains the real gate.
+    "allowedOrigins": ["https://pixel-display-controller.vercel.app", "http://localhost:3000"],
 }
 
 
