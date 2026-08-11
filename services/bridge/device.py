@@ -132,6 +132,10 @@ class DeviceManager:
         self._tasks: list[asyncio.Task] = []
         self._stopping = False
         self.automation = Automation(Path("automation.json"), self.submit)
+        # A single action that hangs (macOS CoreBluetooth can wedge a write
+        # forever) would otherwise block the worker and poison every queued
+        # action. Cap each action and reset the BLE client on a wedge.
+        self._action_timeout: float = 45.0
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -219,7 +223,16 @@ class DeviceManager:
         while not self._stopping:
             action, payload, future = await self.queue.get()
             try:
-                result = await self._execute(action, payload)
+                result = await asyncio.wait_for(
+                    self._execute(action, payload), timeout=self._action_timeout
+                )
+            except asyncio.TimeoutError:
+                # A wedged BLE write can hang forever on macOS; reset the
+                # connection so the reconnect loop resumes with a fresh
+                # CBCentralManager instead of stalling every queued action.
+                log.error("action '%s' hung > %ss — resetting BLE client", action, self._action_timeout)
+                await self._reset_client()
+                result = {"ok": False, "sent": False, "action": action, "error": "action timed out"}
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -229,6 +242,17 @@ class DeviceManager:
             except (asyncio.InvalidStateError, RuntimeError):
                 # caller already gave up (submit timeout) - drop the result
                 pass
+
+    async def _reset_client(self) -> None:
+        """Drop the BLE connection and clear the client so the reconnect loop
+        makes a fresh BleakClient (new CBCentralManager) - recovers macOS
+        CoreBluetooth wedges."""
+        try:
+            await self.conn.disconnect()
+        except Exception:  # noqa: BLE001
+            pass
+        self.conn.client = None
+        self.status["connected"] = False
 
     async def _execute(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         handlers: dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = {
