@@ -135,10 +135,13 @@ class DeviceManager:
         while not self._stopping:
             try:
                 if not self.is_connected:
+                    # macOS CoreBluetooth can hang a connect() forever after a
+                    # drop; a timeout turns the hang into a counted failure so
+                    # the fresh-BleakClient recovery below can kick in.
                     if self.cfg.address == "auto":
-                        await self.conn.connectBySearch()
+                        await asyncio.wait_for(self.conn.connectBySearch(), timeout=30)
                     else:
-                        await self.conn.connectByAddress(self.cfg.address)
+                        await asyncio.wait_for(self.conn.connectByAddress(self.cfg.address), timeout=30)
                     if self.is_connected:
                         self.status["connected"] = True
                         self.status["address"] = self.conn.address
