@@ -6,11 +6,23 @@ import type { Preset } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(await listPresets());
+  try {
+    return NextResponse.json(await listPresets());
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "storage error" },
+      { status: 500 },
+    );
+  }
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as Partial<Preset>;
+  let body: Partial<Preset>;
+  try {
+    body = (await request.json()) as Partial<Preset>;
+  } catch {
+    return NextResponse.json({ error: "body must be JSON" }, { status: 400 });
+  }
   if (!body.name?.trim() || !body.action) {
     return NextResponse.json({ error: "name and action are required" }, { status: 400 });
   }
@@ -23,6 +35,13 @@ export async function POST(request: Request) {
     createdAt: now,
     updatedAt: now,
   };
-  await savePreset(preset);
-  return NextResponse.json(preset, { status: 201 });
+  try {
+    await savePreset(preset);
+    return NextResponse.json(preset, { status: 201 });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "save failed" },
+      { status: 500 },
+    );
+  }
 }

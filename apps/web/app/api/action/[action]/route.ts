@@ -3,6 +3,37 @@ import { BRIDGE_API_KEY, BRIDGE_CONFIGURED, BRIDGE_URL, bridgeFetch } from "@/li
 import type { ActionResult } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+// Let a big GIF upload / slow bridge round-trip finish inside the function
+// budget (Vercel's default is 10s, our bridge timeout is 25s).
+export const maxDuration = 30;
+
+// Only actions the app actually uses may be forwarded to the bridge; anything
+// else is rejected here so internal/administrative bridge endpoints can't be
+// reached through the public web layer.
+const ALLOWED_ACTIONS = new Set([
+  "text",
+  "image",
+  "gif",
+  "clock",
+  "brightness",
+  "screen",
+  "flip",
+  "chronograph",
+  "countdown",
+  "fullscreen-color",
+  "animation",
+  "scoreboard",
+  "sync-time",
+  "reset",
+  "weather",
+  "stocks",
+  "slideshow",
+  "slideshow-next",
+  "scene",
+  "automation-off",
+  "wake",
+  "media-sync",
+]);
 
 async function forward(action: string, body: FormData | Record<string, unknown>) {
   try {
@@ -15,20 +46,23 @@ async function forward(action: string, body: FormData | Record<string, unknown>)
       body: isForm ? (body as FormData) : JSON.stringify(body),
     }, 25_000);
     const text = await res.text();
-    let json: unknown = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {
-      json = { error: text.slice(0, 200) };
+    let detail = "";
+    if (text) {
+      try {
+        const json = JSON.parse(text) as { detail?: unknown };
+        if (typeof json.detail === "string") detail = json.detail;
+      } catch {
+        // non-JSON body (e.g. a platform proxy error) — keep detail empty so we
+        // never echo raw bridge output to clients.
+      }
     }
     if (!res.ok) {
-      const detail = json && typeof json === "object" && "detail" in json ? String((json as { detail: unknown }).detail) : "";
       return NextResponse.json(
-        { ok: false, sent: false, action, error: detail || "bridge error: " + res.status },
+        { ok: false, sent: false, action, error: detail || `bridge error: ${res.status}` },
         { status: 502 },
       );
     }
-    return NextResponse.json(json as ActionResult);
+    return NextResponse.json(JSON.parse(text || "{}") as ActionResult);
   } catch (err) {
     const message = err instanceof Error && err.name === "AbortError" ? "bridge timeout" : "bridge unreachable";
     return NextResponse.json({ ok: false, sent: false, action, error: message }, { status: 502 });
@@ -40,6 +74,9 @@ export async function POST(
   { params }: { params: Promise<{ action: string }> },
 ) {
   const { action } = await params;
+  if (!ALLOWED_ACTIONS.has(action)) {
+    return NextResponse.json({ ok: false, sent: false, action, error: "action not allowed" }, { status: 403 });
+  }
   if (!BRIDGE_CONFIGURED) {
     return NextResponse.json(
       { ok: false, sent: false, action, error: "bridge not configured (BRIDGE_URL / BRIDGE_API_KEY)" },

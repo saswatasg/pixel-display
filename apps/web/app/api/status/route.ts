@@ -4,6 +4,12 @@ import { fetchBridgeStatus } from "@/lib/bridge-server";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const status = await fetchBridgeStatus();
-  return NextResponse.json(status);
+  try {
+    return NextResponse.json(await fetchBridgeStatus());
+  } catch {
+    return NextResponse.json(
+      { bridgeOnline: false, configured: false, reason: "status unavailable", fetchedAt: Date.now() },
+      { status: 500 },
+    );
+  }
 }
