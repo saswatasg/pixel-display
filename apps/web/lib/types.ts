@@ -46,6 +46,7 @@ export interface WeatherData {
   wind_speed: number | null;
   is_day: boolean;
   unit: "c" | "f";
+  city: string;
 }
 
 export interface AppStatus {

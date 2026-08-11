@@ -2,10 +2,15 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ANIMATION_STYLES } from "@/lib/types";
-import type { MediaItem } from "@/lib/types";
-import { sendFile } from "@/lib/api";
 import { Button, Card, Icon, ICONS, Slider, type IconName, Spinner } from "./ui";
 import { ColorPicker } from "./ColorPicker";
+import {
+  deleteFrameMedia,
+  listFrameMedia,
+  toPixelDataUrl,
+  uploadFrameMedia,
+  type CloudMediaItem,
+} from "@/lib/media";
 
 const FRAME_LIMIT = 4;
 
@@ -30,7 +35,7 @@ export function MoreTab({ connected, onSend, onToast }: Props) {
       id: "photoframe",
       icon: "image",
       title: "Photo frame",
-      desc: "Store images on the bridge and cycle them like a slideshow.",
+      desc: "Store images in the cloud and cycle them like a slideshow.",
       render: <PhotoFramePanel connected={connected} onSend={onSend} onToast={onToast} />,
     },
     {
@@ -203,7 +208,7 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
 }
 
 function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected" | "onSend" | "onToast">) {
-  const [media, setMedia] = useState<MediaItem[] | null>(null);
+  const [media, setMedia] = useState<CloudMediaItem[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [intervalSec, setIntervalSec] = useState(20);
@@ -211,9 +216,7 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/media", { cache: "no-store" });
-      const data = (await res.json()) as { ok: boolean; media: MediaItem[] };
-      setMedia(data.media ?? []);
+      setMedia(await listFrameMedia());
     } catch {
       setMedia([]);
     }
@@ -226,9 +229,14 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
   const uploadFile = async (file: File) => {
     setUploading(true);
     try {
-      const res = await sendFile("media-add", file);
+      const dataUrl = await toPixelDataUrl(file);
+      if (!dataUrl) {
+        onToast("Could not read that image");
+        return;
+      }
+      const res = await uploadFrameMedia(dataUrl, file.name);
       if (res.ok) {
-        onToast("Saved to photo frame — " + file.name);
+        onToast("Saved to photo frame (cloud) — " + file.name);
         refresh();
       } else {
         onToast(res.error ?? "Upload failed");
@@ -238,19 +246,36 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
     }
   };
 
-  const remove = async (name: string) => {
-    const ok = await onSend("media-remove", { name });
-    if (ok) {
-      onToast(`Removed ${name}`);
+  const remove = async (id: string) => {
+    const res = await deleteFrameMedia(id);
+    if (res.ok) {
+      onToast("Removed from frame");
       refresh();
+    } else {
+      onToast(res.error ?? "Remove failed");
     }
   };
 
   const start = async () => {
     setBusy(true);
     try {
+      const synced = await onSend("media-sync", {});
+      if (!synced) {
+        onToast("Photo frame could not be started (bridge offline)");
+        return;
+      }
       const ok = await onSend("slideshow", { interval: intervalSec, shuffle });
       if (ok) onToast("Photo frame on");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const power = async (mode: "on" | "off") => {
+    setBusy(true);
+    try {
+      const ok = await onSend("screen", { power: mode });
+      if (ok) onToast(mode === "off" ? "Display powered off — automations stopped" : "Display powered on");
     } finally {
       setBusy(false);
     }
@@ -259,7 +284,7 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between text-xs text-zinc-500">
-        <span>Photos are converted to 32×32 pixels on the bridge</span>
+        <span>Photos are stored in the cloud and converted to 32×32 pixels</span>
         <span className="font-mono">{media === null ? "…" : `${media.length} / ${FRAME_LIMIT}`}</span>
       </div>
       <label
@@ -292,22 +317,24 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
       ) : media.length === 0 ? (
         <p className="text-center text-xs text-zinc-500">Frame is empty — upload a photo first.</p>
       ) : (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-2">
           {media.map((m) => (
-            <span
-              key={m.name}
-              className="group flex items-center gap-1.5 rounded-lg border border-white/10 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300"
-            >
-              {m.name}
-              <button
-                type="button"
-                aria-label={`Remove ${m.name}`}
-                onClick={() => remove(m.name)}
-                className="text-zinc-600 transition-colors hover:text-red-400"
-              >
-                <Icon d={ICONS.close} className="h-3 w-3" />
-              </button>
-            </span>
+            <div key={m.id} className="group w-16 shrink-0">
+              <div className="relative overflow-hidden rounded-lg border border-white/15 bg-black">
+                <img src={m.url} alt={m.name} className="aspect-square w-full" style={{ imageRendering: "pixelated" }} />
+                <button
+                  type="button"
+                  aria-label={`Remove ${m.name}`}
+                  onClick={() => remove(m.id)}
+                  className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-md bg-zinc-950/80 text-zinc-400 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                >
+                  <Icon d={ICONS.close} className="h-3 w-3" />
+                </button>
+              </div>
+              <p className="mt-1 truncate text-[10px] text-zinc-500" title={m.name}>
+                {m.name}
+              </p>
+            </div>
           ))}
         </div>
       )}
@@ -361,6 +388,27 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
           </div>
         </>
       )}
+
+      <div className="rounded-xl border border-white/[0.08] bg-zinc-950/60 p-3">
+        <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">Display power</p>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            disabled={busy || !connected}
+            onClick={() => power("off")}
+            className="!bg-red-500/15 !text-red-300 hover:!bg-red-500/25"
+          >
+            <Icon d={ICONS.power} className="h-3.5 w-3.5" /> Turn off display
+          </Button>
+          <Button size="sm" variant="ghost" disabled={busy || !connected} onClick={() => power("on")}>
+            <Icon d={ICONS.power} className="h-3.5 w-3.5" /> Turn on
+          </Button>
+        </div>
+        <p className="mt-2 text-[11px] text-zinc-600">
+          Powering off also stops the slideshow and any other automation — the display stays off until you turn it
+          back on.
+        </p>
+      </div>
     </div>
   );
 }

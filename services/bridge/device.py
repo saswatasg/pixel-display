@@ -221,6 +221,7 @@ class DeviceManager:
             "automation-off": self._act_automation_off,
             "media-add": self._act_media_add,
             "media-remove": self._act_media_remove,
+            "media-sync": self._act_media_sync,
         }
         if action not in handlers:
             raise ValueError(f"unknown action: {action}")
@@ -340,7 +341,12 @@ class DeviceManager:
         if power not in ("on", "off"):
             raise ValueError("power must be 'on' or 'off'")
         await (self.modules["common"].screenOn() if power == "on" else self.modules["common"].screenOff())
-        return {"sent": True, "power": power}
+        if power == "off":
+            # A powered-off display must stay off: stop any running automation
+            # (e.g. slideshow) so nothing re-uploads and wakes it up again.
+            self.automation.disable()
+            log.info("display powered off - automations stopped")
+        return {"sent": True, "power": power, "automation": self.automation.status}
 
     async def _act_flip(self, payload: dict[str, Any]) -> dict[str, Any]:
         enabled = bool(payload.get("enabled", False))
@@ -554,6 +560,12 @@ class DeviceManager:
         if not name:
             raise ValueError("name must not be empty")
         return self.automation.remove_media(name)
+
+    async def _act_media_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
+        web_url = str(payload.get("webUrl") or self.cfg.web_url or "").strip()
+        result = await self.automation.sync_media(web_url)
+        result["webUrl"] = web_url
+        return result
 
     # ----------------------------------------------------------------- helpers
 

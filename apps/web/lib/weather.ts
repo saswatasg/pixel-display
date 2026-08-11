@@ -54,8 +54,51 @@ export async function fetchWeatherData(lat: number, lon: number, unit: "c" | "f"
     wind_speed: typeof cur.wind_speed_10m === "number" ? cur.wind_speed_10m : null,
     is_day: Boolean(cur.is_day),
     unit,
+    city: "",
   };
 }
+
+// 3x5 uppercase font for the city label — must mirror services/bridge/automations.py FONT_3X5
+export const FONT_3X5: Record<string, string[]> = {
+  A: ["###", "#.#", "###", "#.#", "#.#"],
+  B: ["##.", "#.#", "##.", "#.#", "##."],
+  C: ["###", "#..", "#..", "#..", "###"],
+  D: ["##.", "#.#", "#.#", "#.#", "##."],
+  E: ["###", "#..", "###", "#..", "###"],
+  F: ["###", "#..", "###", "#..", "#.."],
+  G: ["###", "#..", "#.#", "#.#", "###"],
+  H: ["#.#", "#.#", "###", "#.#", "#.#"],
+  I: ["###", ".#.", ".#.", ".#.", "###"],
+  J: ["..#", "..#", "..#", "#.#", "###"],
+  K: ["#.#", "##.", "#.#", "##.", "#.#"],
+  L: ["#..", "#..", "#..", "#..", "###"],
+  M: ["#.#", "###", "###", "#.#", "#.#"],
+  N: ["#.#", "###", "###", "###", "#.#"],
+  O: ["###", "#.#", "#.#", "#.#", "###"],
+  P: ["##.", "#.#", "##.", "#..", "#.."],
+  Q: ["###", "#.#", "#.#", "##.", "#.#"],
+  R: ["##.", "#.#", "##.", "#.#", "#.#"],
+  S: ["###", "#..", "###", "..#", "###"],
+  T: ["###", ".#.", ".#.", ".#.", ".#."],
+  U: ["#.#", "#.#", "#.#", "#.#", "###"],
+  V: ["#.#", "#.#", "#.#", "#.#", ".#."],
+  W: ["#.#", "#.#", "###", "###", "#.#"],
+  X: ["#.#", "#.#", ".#.", "#.#", "#.#"],
+  Y: ["#.#", "#.#", ".#.", ".#.", ".#."],
+  Z: ["###", "..#", ".#.", "#..", "###"],
+  "0": ["###", "#.#", "#.#", "#.#", "###"],
+  "1": [".#.", "##.", ".#.", ".#.", "###"],
+  "2": ["###", "..#", "###", "#..", "###"],
+  "3": ["###", "..#", "###", "..#", "###"],
+  "4": ["#.#", "#.#", "###", "..#", "..#"],
+  "5": ["###", "#..", "###", "..#", "###"],
+  "6": ["###", "#..", "###", "#.#", "###"],
+  "7": ["###", "..#", "..#", "..#", "..#"],
+  "8": ["###", "#.#", "###", "#.#", "###"],
+  "9": ["###", "#.#", "###", "..#", "###"],
+  "-": ["...", "...", "###", "...", "..."],
+  ".": ["...", "...", "...", "...", ".#."],
+};
 
 export function wmoLabel(code: number): string {
   if (code === 0) return "Clear";
@@ -171,14 +214,27 @@ function drawBolt(g: RGBA[][], x: number, y: number) {
     g,
     [
       [x, y],
-      [x - 3, y + 6],
-      [x, y + 6],
-      [x - 1, y + 10],
-      [x + 3, y + 3],
-      [x, y + 3],
+      [x - 2, y + 4],
+      [x, y + 4],
+      [x - 1, y + 7],
+      [x + 2, y + 2],
+      [x, y + 2],
     ],
     BOLT,
   );
+}
+
+function drawText3x5(g: string[][], text: string, x: number, y: number, color: RGBA) {
+  const fill = `rgb(${color[0]},${color[1]},${color[2]})`;
+  for (const ch of text.toUpperCase()) {
+    const glyph = FONT_3X5[ch];
+    if (glyph) {
+      for (let r = 0; r < 5; r++)
+        for (let c = 0; c < 3; c++)
+          if (glyph[r][c] === "#") g[y + r][x + c] = fill;
+    }
+    x += 4;
+  }
 }
 
 function weatherIconGrid(code: number, isDay: boolean): RGBA[][] {
@@ -190,41 +246,41 @@ function weatherIconGrid(code: number, isDay: boolean): RGBA[][] {
   const snowy = [71, 73, 75, 77, 85, 86].includes(code);
   const stormy = code === 95 || code === 96 || code === 99;
 
-  if (code === 0 || (partly && isDay)) drawSun(g, 16, 10, 4);
-  else if (code === 0) drawMoon(g, 16, 10, 4);
+  if (code === 0 || (partly && isDay)) drawSun(g, 16, 12, 4);
+  else if (code === 0) drawMoon(g, 16, 12, 4);
   else if (partly && !isDay) {
-    drawMoon(g, 10, 7, 3);
-    drawCloud(g, 10, 9, 18, 8);
+    drawMoon(g, 10, 9, 3);
+    drawCloud(g, 9, 10, 16, 7);
   } else if (partly) {
-    drawSun(g, 10, 6, 3);
-    drawCloud(g, 11, 8, 17, 8);
+    drawSun(g, 10, 8, 3);
+    drawCloud(g, 10, 9, 16, 7);
   }
-  if (cloudy) drawCloud(g, 7, 7, 18, 8);
+  if (cloudy) drawCloud(g, 7, 10, 18, 7);
   if (foggy) {
-    drawCloud(g, 7, 5, 18, 8);
+    drawCloud(g, 7, 7, 18, 7);
     for (let i = 0; i < 3; i++) {
-      roundedRect(g, 6 + i * 2, 14 + i * 4, 20 - i, 2, 1, CLOUD);
+      roundedRect(g, 6 + i * 2, 15 + i * 2, 20 - i, 2, 1, CLOUD);
     }
   }
   if (rainy) {
     for (let i = 0; i < 3; i++) {
       const x = 8 + i * 6;
       const off = i % 2;
-      line(g, x, 20 + off, x - 2, 27 - off, RAIN, 2);
+      line(g, x, 17 + off, x - 2, 21 - off, RAIN, 2);
     }
   }
   if (snowy) {
     for (const [px, py] of [
-      [9, 23],
-      [16, 20],
-      [22, 23],
+      [9, 18],
+      [16, 16],
+      [22, 18],
     ]) {
       fillRect(g, px - 1, py - 1, 2, 2, SNOW);
       line(g, px - 3, py, px + 3, py, SNOW, 1);
       line(g, px, py - 3, px, py + 3, SNOW, 1);
     }
   }
-  if (stormy) drawBolt(g, 20, 16);
+  if (stormy) drawBolt(g, 22, 14);
   return g;
 }
 
@@ -232,24 +288,35 @@ export function renderWeatherPreview(weather: WeatherData, accent: string): stri
   const base = weatherIconGrid(weather.weather_code, weather.is_day);
   const grid: string[][] = base.map((row) => row.map(([r, gg, b, a]) => (a === 0 ? "rgba(255,255,255,0.08)" : `rgb(${r},${gg},${b})`)));
 
+  const color: RGBA = hexToRgba(accent);
+  const city = (weather.city || "NOW").replace(/[^a-zA-Z0-9\-.]/g, "").toUpperCase().slice(0, 8);
+  drawText3x5(grid, city, Math.round((32 - city.length * 4) / 2), 0, color);
+
   const temp = weather.temperature == null ? "--°" : `${Math.round(weather.temperature)}°`;
-  const cell = temp.length <= 3 ? 2 : 1;
-  const total = (5 * cell + cell) * temp.length;
+  const pitch = 6;
+  const total = pitch * temp.length;
   let x = Math.round((32 - total) / 2);
-  const y = cell === 2 ? 21 : 22;
+  const y = 22;
   for (const ch of temp) {
     if (ch === "°") {
-      fillRect(grid, x + 1, y, cell, cell, accent);
+      fillRect(grid, x + 2, y, 2, 2, accent);
     } else {
       const glyph = FONT_5X7[ch];
       if (glyph) {
         for (let r = 0; r < 7; r++)
           for (let c = 0; c < 5; c++)
-            if (glyph[r][c] === "#")
-              fillRect(grid, x + c * cell, y + r * cell, Math.max(0, cell - 1), Math.max(0, cell - 1), accent);
+            if (glyph[r][c] === "#") fillRect(grid, x + c, y + r, 1, 1, accent);
       }
     }
-    x += 5 * cell + cell;
+    x += pitch;
   }
   return grid;
+}
+
+function hexToRgba(value: string): RGBA {
+  const m = value.replace("#", "");
+  const full = m.length === 3 ? m.split("").map((c) => c + c).join("") : m;
+  const n = parseInt(full, 16);
+  if (Number.isNaN(n) || full.length !== 6) return [255, 255, 255, 255];
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255, 255];
 }

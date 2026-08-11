@@ -47,6 +47,48 @@ FONT_5X7: dict[str, list[str]] = {
     "-": [".....", ".....", ".....", "#####", ".....", ".....", "....."],
 }
 
+# 3x5 uppercase font for compact labels (weather city), pitch 4px including gap
+FONT_3X5: dict[str, list[str]] = {
+    "A": ["###", "#.#", "###", "#.#", "#.#"],
+    "B": ["##.", "#.#", "##.", "#.#", "##."],
+    "C": ["###", "#..", "#..", "#..", "###"],
+    "D": ["##.", "#.#", "#.#", "#.#", "##."],
+    "E": ["###", "#..", "###", "#..", "###"],
+    "F": ["###", "#..", "###", "#..", "#.."],
+    "G": ["###", "#..", "#.#", "#.#", "###"],
+    "H": ["#.#", "#.#", "###", "#.#", "#.#"],
+    "I": ["###", ".#.", ".#.", ".#.", "###"],
+    "J": ["..#", "..#", "..#", "#.#", "###"],
+    "K": ["#.#", "##.", "#.#", "##.", "#.#"],
+    "L": ["#..", "#..", "#..", "#..", "###"],
+    "M": ["#.#", "###", "###", "#.#", "#.#"],
+    "N": ["#.#", "###", "###", "###", "#.#"],
+    "O": ["###", "#.#", "#.#", "#.#", "###"],
+    "P": ["##.", "#.#", "##.", "#..", "#.."],
+    "Q": ["###", "#.#", "#.#", "##.", "#.#"],
+    "R": ["##.", "#.#", "##.", "#.#", "#.#"],
+    "S": ["###", "#..", "###", "..#", "###"],
+    "T": ["###", ".#.", ".#.", ".#.", ".#."],
+    "U": ["#.#", "#.#", "#.#", "#.#", "###"],
+    "V": ["#.#", "#.#", "#.#", "#.#", ".#."],
+    "W": ["#.#", "#.#", "###", "###", "#.#"],
+    "X": ["#.#", "#.#", ".#.", "#.#", "#.#"],
+    "Y": ["#.#", "#.#", ".#.", ".#.", ".#."],
+    "Z": ["###", "..#", ".#.", "#..", "###"],
+    "0": ["###", "#.#", "#.#", "#.#", "###"],
+    "1": [".#.", "##.", ".#.", ".#.", "###"],
+    "2": ["###", "..#", "###", "#..", "###"],
+    "3": ["###", "..#", "###", "..#", "###"],
+    "4": ["#.#", "#.#", "###", "..#", "..#"],
+    "5": ["###", "#..", "###", "..#", "###"],
+    "6": ["###", "#..", "###", "#.#", "###"],
+    "7": ["###", "..#", "..#", "..#", "..#"],
+    "8": ["###", "#.#", "###", "#.#", "###"],
+    "9": ["###", "#.#", "###", "..#", "###"],
+    "-": ["...", "...", "###", "...", "..."],
+    ".": ["...", "...", "...", "...", ".#."],
+}
+
 
 # ------------------------------------------------------------------ fetchers
 
@@ -55,6 +97,12 @@ def _http_json(url: str, timeout: float = 12.0) -> dict[str, Any]:
     req = urllib.request.Request(url, headers={"User-Agent": "pixel-display-bridge/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _http_bytes(url: str, timeout: float = 20.0) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": "pixel-display-bridge/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return resp.read()
 
 
 async def fetch_weather(lat: float, lon: float, unit: str = "c") -> dict[str, Any]:
@@ -142,11 +190,14 @@ def _draw_cloud(d: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int, color: t
 
 
 def _draw_bolt(d: ImageDraw.ImageDraw, x: int, y: int, color: tuple[int, int, int]) -> None:
-    d.polygon([(x, y), (x - 3, y + 6), (x, y + 6), (x - 1, y + 10), (x + 3, y + 3), (x, y + 3)], fill=color)
+    d.polygon(
+        [(x, y), (x - 2, y + 4), (x, y + 4), (x - 1, y + 7), (x + 2, y + 2), (x, y + 2)],
+        fill=color,
+    )
 
 
 def _weather_icon_image(code: int, is_day: bool) -> Image.Image:
-    """32x32 icon for a WMO weather code."""
+    """32x32 icon for a WMO weather code, drawn in the middle band (rows 6-19)."""
     bg = (0, 0, 0, 0)
     sun_c = (255, 211, 77)
     moon_c = (228, 233, 246)
@@ -167,40 +218,57 @@ def _weather_icon_image(code: int, is_day: bool) -> Image.Image:
     stormy = code in (95, 96, 99)
 
     if code == 0 or (partly and is_day):
-        _draw_sun(d, 16, 10, 4, sun_c)
+        _draw_sun(d, 16, 12, 4, sun_c)
     elif code == 0:
-        _draw_moon(d, 16, 10, 4, moon_c, bg)
+        _draw_moon(d, 16, 12, 4, moon_c, bg)
     elif partly and not is_day:
-        _draw_moon(d, 10, 7, 3, moon_c, bg)
-        _draw_cloud(d, 10, 9, 18, 8, cloud_c)
+        _draw_moon(d, 10, 9, 3, moon_c, bg)
+        _draw_cloud(d, 9, 10, 16, 7, cloud_c)
     elif partly:
-        _draw_sun(d, 10, 6, 3, sun_c)
-        _draw_cloud(d, 11, 8, 17, 8, cloud_c)
+        _draw_sun(d, 10, 8, 3, sun_c)
+        _draw_cloud(d, 10, 9, 16, 7, cloud_c)
 
     if cloudy:
-        _draw_cloud(d, 7, 7, 18, 8, cloud_c)
+        _draw_cloud(d, 7, 10, 18, 7, cloud_c)
     if foggy:
-        _draw_cloud(d, 7, 5, 18, 8, cloud_c)
-        for i, y in enumerate((14, 18, 22)):
+        _draw_cloud(d, 7, 7, 18, 7, cloud_c)
+        for i, y in enumerate((15, 17, 19)):
             d.rounded_rectangle((6 + i * 2, y, 26 - i, y + 2), radius=1, fill=cloud_c)
     if rainy or heavy:
         for i, x in enumerate((8, 14, 20)):
-            d.line((x, 20 + i % 2, x - 2, 27 - i % 2), fill=rain_c, width=2)
+            d.line((x, 17 + i % 2, x - 2, 21 - i % 2), fill=rain_c, width=2)
     if snowy:
-        for x, y in ((9, 23), (16, 20), (22, 23)):
+        for x, y in ((9, 18), (16, 16), (22, 18)):
             d.rectangle((x - 1, y - 1, x + 1, y + 1), fill=snow_c)
             d.line((x - 3, y, x + 3, y), fill=snow_c)
             d.line((x, y - 3, x, y + 3), fill=snow_c)
     if stormy:
-        _draw_bolt(d, 20, 16, bolt_c)
+        _draw_bolt(d, 22, 14, bolt_c)
     return icon
 
 
-# ------------------------------------------------------------------ rendering
+# ---------------------------------------------------------------- rendering
 
 
-def render_weather_png(weather: dict[str, Any], accent: tuple[int, int, int] = (255, 255, 255)) -> bytes:
-    """Compose a 32x32 RGB weather image: icon on top, temperature on the bottom.
+def _draw_text_3x5(d: ImageDraw.ImageDraw, text: str, x: int, y: int, color: tuple[int, int, int]) -> None:
+    """Draw uppercase text with the 3x5 font (pitch 4px)."""
+    for ch in text.upper():
+        glyph = FONT_3X5.get(ch)
+        if glyph:
+            for r in range(5):
+                for c in range(3):
+                    if glyph[r][c] == "#":
+                        d.rectangle((x + c, y + r, x + c, y + r), fill=color)
+        x += 4
+
+
+def render_weather_png(
+    weather: dict[str, Any],
+    accent: tuple[int, int, int] = (255, 255, 255),
+    city: str = "",
+) -> bytes:
+    """Compose a 32x32 RGB weather card: city on top, icon in the middle band,
+    temperature at the bottom.
 
     NOTE: must be plain RGB (no alpha channel) - the device firmware's PNG
     decoder garbles RGBA images into scattered pixels.
@@ -213,28 +281,29 @@ def render_weather_png(weather: dict[str, Any], accent: tuple[int, int, int] = (
     icon = _weather_icon_image(code, is_day)
     img.paste(icon, (0, 0), icon)
 
+    label = "".join(ch for ch in city.upper() if ch.isalnum() or ch in "-.") or "NOW"
+    label = label[:8]
+    _draw_text_3x5(d, label, (32 - len(label) * 4) // 2, 0, accent)
+
     temp = weather.get("temperature")
     deg = "" if temp is None else f"{round(float(temp))}\u00b0"
     if not deg:
         deg = "--\u00b0"
-    cell = 2 if len(deg) <= 3 else 1
-    total_w = (5 * cell + cell) * len(deg)
+    pitch = 6
+    total_w = pitch * len(deg)
     x = (32 - total_w) // 2
-    y = 21 if cell == 2 else 22
+    y = 22
     for ch in deg:
         if ch == "\u00b0":
-            d.rectangle((x + 1, y, x + cell + 1, y + cell), fill=accent)
+            d.rectangle((x + 2, y, x + 3, y + 1), fill=accent)
         else:
             glyph = FONT_5X7.get(ch)
             if glyph:
                 for r in range(7):
                     for c in range(5):
                         if glyph[r][c] == "#":
-                            d.rectangle(
-                                (x + c * cell, y + r * cell, x + c * cell + cell - 1, y + r * cell + cell - 1),
-                                fill=accent,
-                            )
-        x += 5 * cell + cell
+                            d.rectangle((x + c, y + r, x + c, y + r), fill=accent)
+        x += pitch
     buf = __import__("io").BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -392,8 +461,17 @@ class Automation:
         if kind == "weather":
             return max(60, int(cfg.get("interval", 30)) * 60)
         if kind == "stocks":
-            # rotate one symbol at a time so short strings never get cut off
-            return max(5, 6)
+            # Rotate one symbol at a time; hold long enough for the FULL line
+            # (symbol + change) to scroll across the 32px window before the
+            # next symbol replaces it. Sized off the longest quote so short
+            # names don't flick past either.
+            cache = self._stock_cache
+            longest = 22
+            if cache.get("quotes"):
+                longest = max(len(q.get("symbol", "")) + 10 for q in cache["quotes"])
+            # 16px font: full marquee needs (chars*16 + 32) px; assume a slow
+            # 30px/s scroll so the line provably completes, plus settle time.
+            return max(10, int((longest * 16 + 32) / 30) + 4)
         if kind == "slideshow":
             return max(5, int(cfg.get("interval", 20)))
         if kind == "clock":
@@ -444,7 +522,8 @@ class Automation:
             unit = "f" if cfg.get("unit") == "f" else "c"
             weather = await fetch_weather(lat, lon, unit)
             accent = _hex_to_rgb(str(cfg.get("color", "#FFFFFF")))
-            png = await asyncio.to_thread(render_weather_png, weather, accent)
+            city = str(cfg.get("name", "")).strip()
+            png = await asyncio.to_thread(render_weather_png, weather, accent, city)
             b64 = base64.b64encode(png).decode()
             return await self.runner("image", {"image_base64": b64, "_automation": kind})
         if kind == "stocks":
@@ -474,7 +553,7 @@ class Automation:
                 {
                     "text": line,
                     "mode": 1,
-                    "speed": 60,
+                    "speed": 80,
                     "size": 16,
                     "color": str(cfg.get("color", "#FFFFFF")),
                     "color_mode": 1,
@@ -508,10 +587,16 @@ class Automation:
     MAX_MEDIA = 4
 
     def add_media(self, data: bytes, name: str) -> dict[str, Any]:
-        import io
-
         if len(self.list_media()) >= self.MAX_MEDIA:
             raise ValueError(f"photo frame is full ({self.MAX_MEDIA} photos) - remove one first")
+        clean = self._store_media(data, name)
+        log.info("media added: %s", clean)
+        return {"name": clean, "count": len(self.list_media())}
+
+    def _store_media(self, data: bytes, name: str) -> str:
+        """Normalize an image to a 32x32 RGB PNG on disk and return its name."""
+        import io
+
         self.media_dir.mkdir(parents=True, exist_ok=True)
         clean = "".join(ch for ch in Path(name).name if ch.isalnum() or ch in ".-_").strip()
         if not clean:
@@ -532,8 +617,45 @@ class Automation:
             raise ValueError("file is not a valid image")
         path = self.media_dir / clean
         path.write_bytes(normalized)
-        log.info("media added: %s (%d bytes)", clean, len(normalized))
-        return {"name": clean, "size": len(normalized), "count": len(self.list_media())}
+        return clean
+
+    async def sync_media(self, web_url: str) -> dict[str, Any]:
+        """Mirror the cloud photo-frame catalog (Vercel Blob) into the local
+        media dir so the slideshow can run against the display."""
+        if not web_url:
+            raise ValueError("webUrl is not configured on the bridge")
+        catalog_url = f"{web_url.rstrip('/')}/api/media"
+        try:
+            catalog = await asyncio.to_thread(_http_json, catalog_url)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"cloud media list unreachable: {exc}") from exc
+        items = catalog.get("media") or []
+        if len(items) > self.MAX_MEDIA:
+            items = items[: self.MAX_MEDIA]
+
+        def reconcile() -> dict[str, Any]:
+            kept = {str(it.get("name", "")).strip() for it in items if it.get("name")}
+            for path in self.media_dir.glob("*.png"):
+                if path.name not in kept:
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+            added: list[str] = []
+            for it in items:
+                name = str(it.get("name", "")).strip()
+                url = str(it.get("url", "")).strip()
+                if not name or not url or (self.media_dir / name).exists():
+                    continue
+                try:
+                    data = _http_bytes(url)
+                    self._store_media(data, name)
+                    added.append(name)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("media-sync download failed for %s: %s", name, exc)
+            return {"ok": True, "synced": len(added), "count": len(self.list_media())}
+
+        return await asyncio.to_thread(reconcile)
 
     def remove_media(self, name: str) -> dict[str, Any]:
         path = self.media_dir / Path(name).name

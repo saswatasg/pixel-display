@@ -16,11 +16,33 @@ interface Props {
 
 const DEFAULT_PLACE: GeoResult = { name: "Berlin", country: "Germany", lat: 52.52, lon: 13.405 };
 
+const PLACE_KEY = "pixel-display:weather-place:v1";
+
+function loadPlace(): GeoResult {
+  try {
+    const raw = localStorage.getItem(PLACE_KEY);
+    if (!raw) return DEFAULT_PLACE;
+    const p = JSON.parse(raw) as GeoResult;
+    if (typeof p?.lat === "number" && typeof p?.lon === "number" && typeof p?.name === "string") return p;
+  } catch {
+    // ignore corrupt storage
+  }
+  return DEFAULT_PLACE;
+}
+
+function savePlace(p: GeoResult) {
+  try {
+    localStorage.setItem(PLACE_KEY, JSON.stringify(p));
+  } catch {
+    // storage blocked — best effort
+  }
+}
+
 export function WeatherTab({ connected, onSend, onToast }: Props) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GeoResult[] | null>(null);
   const [searching, setSearching] = useState(false);
-  const [place, setPlace] = useState<GeoResult>(DEFAULT_PLACE);
+  const [place, setPlace] = useState<GeoResult>(loadPlace);
   const [unit, setUnit] = useState<"c" | "f">("c");
   const [color, setColor] = useState("#00E5FF");
   const [intervalMin, setIntervalMin] = useState(30);
@@ -34,7 +56,7 @@ export function WeatherTab({ connected, onSend, onToast }: Props) {
       setFetching(true);
       try {
         const w = await fetchWeatherData(p.lat, p.lon, u);
-        setWeather(w);
+        setWeather({ ...w, city: p.name });
       } catch {
         setWeather(null);
       } finally {
@@ -75,6 +97,7 @@ export function WeatherTab({ connected, onSend, onToast }: Props) {
 
   const selectPlace = (p: GeoResult) => {
     setPlace(p);
+    savePlace(p);
     setQuery("");
     setResults(null);
     update(p, unit);

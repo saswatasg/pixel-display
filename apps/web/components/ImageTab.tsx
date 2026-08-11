@@ -5,6 +5,7 @@ import { sendFile } from "@/lib/api";
 import { Button, Card, Icon, ICONS } from "./ui";
 import { PixelPreview } from "./PixelPreview";
 import { DisplayBezel } from "./DisplayBezel";
+import { addPastImage, deletePastImage, listPastImages, toPixelDataUrl, uploadFrameMedia, type CloudMediaItem } from "@/lib/media";
 
 interface Props {
   connected: boolean;
@@ -12,102 +13,51 @@ interface Props {
   onToast: (message: string) => void;
 }
 
-interface PastImage {
-  id: string;
-  name: string;
-  dataUrl: string;
-  at: number;
-}
-
-const HISTORY_KEY = "pixel-display:past-images:v1";
-const HISTORY_LIMIT = 10;
-
-function loadHistory(): PastImage[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as PastImage[];
-    return Array.isArray(parsed) ? parsed.slice(0, HISTORY_LIMIT) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(items: PastImage[]) {
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
-  } catch {
-    // storage full/blocked — history is best-effort
-  }
-}
-
 export function ImageTab({ connected, onSend, onToast }: Props) {
   const [fileInfo, setFileInfo] = useState<{ file: File | null }>({ file: null });
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [history, setHistory] = useState<PastImage[]>([]);
+  const [history, setHistory] = useState<CloudMediaItem[]>([]);
 
   const file = fileInfo.file;
 
   const isGif = Boolean(file && (file.type === "image/gif" || file.name.toLowerCase().endsWith(".gif")));
 
   useEffect(() => {
-    setHistory(loadHistory());
+    listPastImages()
+      .then((items) => setHistory(items))
+      .catch(() => setHistory([]));
   }, []);
-
-  const toPixelDataUrl = useCallback(async (f: File): Promise<string | null> => {
-    try {
-      const bitmap = await createImageBitmap(f);
-      const canvas = document.createElement("canvas");
-      canvas.width = 32;
-      canvas.height = 32;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        bitmap.close();
-        return null;
-      }
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(bitmap, 0, 0, 32, 32);
-      bitmap.close();
-      return canvas.toDataURL("image/png");
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const remember = useCallback(
-    async (f: File) => {
-      const dataUrl = await toPixelDataUrl(f);
-      if (!dataUrl) return;
-      setHistory((prev) => {
-        const next = [{ id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: f.name, dataUrl, at: Date.now() }, ...prev].slice(0, HISTORY_LIMIT);
-        saveHistory(next);
-        return next;
-      });
-    },
-    [toPixelDataUrl],
-  );
 
   const pick = useCallback(
-    (f: File | null) => {
+    async (f: File | null) => {
       setFileInfo({ file: f && f.type.startsWith("image/") ? f : null });
-      if (f && f.type.startsWith("image/")) remember(f);
+      if (f && f.type.startsWith("image/")) {
+        const dataUrl = await toPixelDataUrl(f);
+        if (dataUrl) {
+          const res = await addPastImage(dataUrl, f.name);
+          if (res.ok) {
+            const items = await listPastImages();
+            setHistory(items);
+          }
+        }
+      }
     },
-    [remember],
+    [],
   );
 
-  const deletePast = useCallback((id: string) => {
-    setHistory((prev) => {
-      const next = prev.filter((p) => p.id !== id);
-      saveHistory(next);
-      return next;
-    });
-  }, []);
+  const deletePast = useCallback(
+    async (id: string) => {
+      const res = await deletePastImage(id);
+      if (res.ok) setHistory(await listPastImages());
+    },
+    [],
+  );
 
   const sendPast = useCallback(
-    async (p: PastImage) => {
-      const res = await fetch(p.dataUrl);
+    async (p: CloudMediaItem) => {
+      const res = await fetch(p.url);
       const blob = await res.blob();
       const f = new File([blob], p.name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png" });
       const sent = await sendFile("image", f);
@@ -133,8 +83,13 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
     if (!file || isGif) return;
     setSaving(true);
     try {
-      const res = await sendFile("media-add", file);
-      if (res.ok) onToast("Saved to photo frame");
+      const dataUrl = await toPixelDataUrl(file);
+      if (!dataUrl) {
+        onToast("Could not read that image");
+        return;
+      }
+      const res = await uploadFrameMedia(dataUrl, file.name);
+      if (res.ok) onToast("Saved to photo frame (cloud)");
       else onToast(res.error ?? "Save failed");
     } finally {
       setSaving(false);
@@ -202,7 +157,7 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
                 {busy ? "Uploading…" : `Send ${isGif ? "GIF" : "image"}`}
               </Button>
               {!isGif && (
-                <Button variant="ghost" onClick={saveToFrame} disabled={saving || !connected} title="Keep in the photo frame for slideshows">
+                <Button variant="ghost" onClick={saveToFrame} disabled={saving} title="Keep in the photo frame for slideshows (stored in the cloud)">
                   {saving ? "Saving…" : "Save to frame"}
                 </Button>
               )}
@@ -217,14 +172,14 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
       {history.length > 0 && (
         <Card
           title="Past images"
-          subtitle={`Pixel-converted uploads kept on this device — newest ${HISTORY_LIMIT} only`}
+          subtitle="Pixel-converted uploads kept in the cloud — accessible from anywhere"
           icon={<Icon d={ICONS.copy} className="h-5 w-5" />}
         >
           <div className="flex gap-3 overflow-x-auto pb-2">
             {history.map((p) => (
               <div key={p.id} className="group w-28 shrink-0">
                 <div className="relative overflow-hidden rounded-lg border border-white/15 bg-black">
-                  <img src={p.dataUrl} alt={p.name} className="aspect-square w-full" style={{ imageRendering: "pixelated" }} />
+                  <img src={p.url} alt={p.name} className="aspect-square w-full" style={{ imageRendering: "pixelated" }} />
                   <button
                     type="button"
                     aria-label={`Delete ${p.name}`}
@@ -254,7 +209,7 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
           </li>
           <li className="flex gap-2">
             <span className="text-amber-400">·</span>
-            <span>Images are resized and processed on the bridge before upload.</span>
+            <span>Images are converted to 32×32 here in the app and stored in the cloud.</span>
           </li>
           <li className="flex gap-2">
             <span className="text-amber-400">·</span>

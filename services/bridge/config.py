@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     "deviceId": "pixel-display",
     "displaySize": 32,
     "reconnectIntervalSec": 5,
+    "webUrl": "https://pixel-display-controller.vercel.app",
     "allowedOrigins": ["*"],
 }
 
@@ -56,6 +57,7 @@ class Config:
         self.device_id: str = str(raw["deviceId"])
         self.display_size: int = int(raw["displaySize"])
         self.reconnect_interval: int = int(raw["reconnectIntervalSec"])
+        self.web_url: str = str(raw.get("webUrl") or "").strip()
         self.allowed_origins: list[str] = list(raw["allowedOrigins"])
 
     @property
