@@ -690,11 +690,11 @@ class Automation:
             cfg["index"] = (idx + 1) % len(media)
             return await self.runner("image", {"image_base64": base64.b64encode(data).decode(), "_automation": kind})
         if kind == "clock":
-            return await self.runner("clock", cfg)
+            return await self.runner("clock", {**cfg, "_automation": kind})
         if kind == "effect":
-            return await self.runner("animation", cfg)
+            return await self.runner("animation", {**cfg, "_automation": kind})
         if kind == "text":
-            return await self.runner("text", cfg)
+            return await self.runner("text", {**cfg, "_automation": kind})
         raise ValueError(f"unknown program: {kind}")
 
     # ------------------------------------------------------------------ media

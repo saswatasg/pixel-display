@@ -210,6 +210,13 @@ class DeviceManager:
                 f"display is not connected (address: {self.status['address'] or 'auto'})"
             )
 
+    def _hold_fresh(self, payload: dict[str, Any]) -> None:
+        """A manual one-shot (text/clock/effect/color/…) takes over the display:
+        stop any scheduled automation so its interval can't re-render over it.
+        Automation-driven sends carry an "_automation" key and are left alone."""
+        if "_automation" not in payload:
+            self.automation.disable()
+
     # ---------------------------------------------------------- action queueing
 
     async def submit(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -310,6 +317,7 @@ class DeviceManager:
         )
         if sent is False:
             raise RuntimeError("library failed to send text")
+        self._hold_fresh(payload)
         return {"sent": True, "chars": len(text)}
 
     async def _act_image(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -328,6 +336,7 @@ class DeviceManager:
             result = await self.modules["image"].uploadProcessed(path, self.cfg.display_size)
             if result is False:
                 raise RuntimeError("library failed to upload image")
+            self._hold_fresh(payload)
             return {"sent": True, "bytes": len(data)}
         finally:
             Path(path).unlink(missing_ok=True)
@@ -348,6 +357,7 @@ class DeviceManager:
                 result = await self.modules["gif"].uploadUnprocessed(path)
             if result is False:
                 raise RuntimeError("library failed to upload gif")
+            self._hold_fresh(payload)
             return {"sent": True, "bytes": len(data)}
         finally:
             Path(path).unlink(missing_ok=True)
@@ -367,6 +377,7 @@ class DeviceManager:
         )
         if sent is False:
             raise RuntimeError("library failed to set clock")
+        self._hold_fresh(payload)
         if bool(payload.get("syncTime", True)):
             await self._act_sync_time({})
         return {"sent": True, "style": style}
@@ -421,6 +432,7 @@ class DeviceManager:
         sent = await self.modules["chronograph"].setMode(modes[mode])
         if sent is False:
             raise RuntimeError("library failed to control chronograph")
+        self._hold_fresh(payload)
         return {"sent": True, "mode": mode}
 
     async def _act_countdown(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -436,6 +448,7 @@ class DeviceManager:
         sent = await self.modules["countdown"].setMode(1, minutes, secs)
         if sent is False:
             raise RuntimeError("library failed to set countdown")
+        self._hold_fresh(payload)
         return {"sent": True, "seconds": seconds}
 
     async def _act_fullscreen_color(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -443,6 +456,7 @@ class DeviceManager:
         sent = await self.modules["fullscreen"].setMode(r, g, b)
         if sent is False:
             raise RuntimeError("library failed to set fullscreen color")
+        self._hold_fresh(payload)
         return {"sent": True, "color": "#{:02x}{:02x}{:02x}".format(r, g, b)}
 
     async def _act_animation(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -471,6 +485,7 @@ class DeviceManager:
         sent = await self.modules["effect"].setMode(style, colors, speed=speed)
         if sent is False:
             raise RuntimeError("library failed to set animation")
+        self._hold_fresh(payload)
         return {"sent": True, "style": style, "speed": speed}
 
     async def _act_scoreboard(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -479,6 +494,7 @@ class DeviceManager:
         sent = await self.modules["scoreboard"].setMode(score1, score2)
         if sent is False:
             raise RuntimeError("library failed to set scoreboard")
+        self._hold_fresh(payload)
         return {"sent": True, "score1": score1, "score2": score2}
 
     async def _act_reset(self, payload: dict[str, Any]) -> dict[str, Any]:
