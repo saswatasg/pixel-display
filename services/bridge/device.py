@@ -70,6 +70,39 @@ def hex_to_rgb(value: str, default: tuple[int, int, int] = (255, 255, 255)) -> t
         return default
 
 
+class EffectWithSpeed(Effect):
+    """Effect with a configurable play speed.
+
+    The stock library hardcodes byte 5 of the effect command to 90; that byte
+    is the animation speed on the firmware (0-255), so we expose it.
+    """
+
+    async def setMode(  # noqa: N802
+        self,
+        style: int,
+        rgb_values: list[tuple[int, int, int]],
+        speed: int = 90,
+    ) -> Any:
+        if style not in range(0, 7):
+            raise ValueError("effect style must be between 0 and 6")
+        if speed not in range(0, 256):
+            raise ValueError("effect speed must be between 0 and 255")
+        if len(rgb_values) not in range(2, 8):
+            raise ValueError("effect needs between 2 and 7 colors")
+        processed: list[tuple[int, int, int]] = []
+        for rgb in rgb_values:
+            padded = tuple(rgb) + (255,) * (3 - len(rgb))
+            processed.append(tuple(c % 256 for c in padded))  # type: ignore[arg-type]
+        data = bytearray(
+            [6 + len(processed), 0, 3, 2, style % 256, speed % 256, len(processed) % 256]
+            + [component for rgb in processed for component in rgb]
+        )
+        if self.conn:
+            await self.conn.connect()
+            await self.conn.send(data=data)
+        return data
+
+
 class DeviceManager:
     def __init__(self, config: Config) -> None:
         self.cfg = config
@@ -83,7 +116,7 @@ class DeviceManager:
             "countdown": Countdown(),
             "fullscreen": FullscreenColor(),
             "common": Common(),
-            "effect": Effect(),
+            "effect": EffectWithSpeed(),
             "scoreboard": Scoreboard(),
         }
         self.queue: asyncio.Queue = asyncio.Queue()
@@ -407,10 +440,13 @@ class DeviceManager:
                 colors.append(tuple(int(c) % 256 for c in color))  # type: ignore[arg-type]
         if len(colors) < 2:
             raise ValueError("animation needs between 2 and 7 colors")
-        sent = await self.modules["effect"].setMode(style, colors)
+        speed = int(payload.get("speed", 90))
+        if speed not in range(0, 256):
+            raise ValueError("animation speed must be between 0 and 255")
+        sent = await self.modules["effect"].setMode(style, colors, speed=speed)
         if sent is False:
             raise RuntimeError("library failed to set animation")
-        return {"sent": True, "style": style}
+        return {"sent": True, "style": style, "speed": speed}
 
     async def _act_scoreboard(self, payload: dict[str, Any]) -> dict[str, Any]:
         score1 = max(0, min(999, int(payload.get("score1", 0))))
@@ -463,11 +499,15 @@ class DeviceManager:
         if not symbols:
             raise ValueError("symbols must not be empty")
         interval = max(5, min(120, int(payload.get("interval", 10))))
+        speed = int(payload.get("speed", 80))
+        if speed not in range(0, 256):
+            raise ValueError("ticker speed must be between 0 and 255")
         program = {
             "type": "stocks",
             "config": {
                 "symbols": symbols[:4],
                 "interval": interval,
+                "speed": speed,
                 "color": str(payload.get("color", "#FFFFFF")),
             },
         }

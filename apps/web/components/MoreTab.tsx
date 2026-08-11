@@ -132,6 +132,7 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
   const [symbols, setSymbols] = useState("AAPL, NVDA");
   const [color, setColor] = useState("#7CFF6B");
   const [interval, setIntervalMin] = useState(10);
+  const [speed, setSpeed] = useState(80);
   const [busy, setBusy] = useState(false);
 
   const list = () => symbols.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
@@ -148,7 +149,7 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
     }
     setBusy(true);
     try {
-      const ok = await onSend("stocks", { symbols: syms, color, interval });
+      const ok = await onSend("stocks", { symbols: syms, color, interval, speed });
       if (ok) onToast(`Ticker on — ${syms.join(", ")}`);
     } finally {
       setBusy(false);
@@ -186,6 +187,16 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
         onChange={setIntervalMin}
         format={(v) => `${v} min`}
         marks={[5, 30, 60, 120]}
+      />
+      <Slider
+        label="Scroll speed"
+        value={speed}
+        min={10}
+        max={255}
+        step={5}
+        onChange={setSpeed}
+        format={(v) => String(v)}
+        marks={[10, 80, 160, 255]}
       />
       <div className="flex flex-wrap gap-2">
         <Button onClick={apply} disabled={busy || !connected}>
@@ -652,6 +663,7 @@ function FullscreenPanel({ connected, onSend, onToast }: Pick<Props, "connected"
 
 function AnimationPanel({ connected, onSend, onToast }: Pick<Props, "connected" | "onSend" | "onToast">) {
   const [style, setStyle] = useState(0);
+  const [speed, setSpeed] = useState(90);
   return (
     <div className="space-y-3">
       <div>
@@ -674,10 +686,20 @@ function AnimationPanel({ connected, onSend, onToast }: Pick<Props, "connected" 
           ))}
         </div>
       </div>
+      <Slider
+        label="Animation speed"
+        value={speed}
+        min={1}
+        max={255}
+        step={5}
+        onChange={setSpeed}
+        format={(v) => String(v)}
+        marks={[1, 90, 180, 255]}
+      />
       <Button
         disabled={!connected}
         onClick={async () => {
-          const ok = await onSend("animation", { style, colors: null });
+          const ok = await onSend("animation", { style, colors: null, speed });
           if (ok) onToast("Effect playing");
         }}
       >

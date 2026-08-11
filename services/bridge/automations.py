@@ -463,15 +463,15 @@ class Automation:
         if kind == "stocks":
             # Rotate one symbol at a time; hold long enough for the FULL line
             # (symbol + change) to scroll across the 32px window before the
-            # next symbol replaces it. Sized off the longest quote so short
-            # names don't flick past either.
+            # next symbol replaces it. Sized off the longest quote and the
+            # configured scroll speed so names never get cut off.
             cache = self._stock_cache
             longest = 22
             if cache.get("quotes"):
                 longest = max(len(q.get("symbol", "")) + 10 for q in cache["quotes"])
-            # 16px font: full marquee needs (chars*16 + 32) px; assume a slow
-            # 30px/s scroll so the line provably completes, plus settle time.
-            return max(10, int((longest * 16 + 32) / 30) + 4)
+            speed = max(1, min(255, int(cfg.get("speed", 80))))
+            px_per_s = speed * 30 / 80
+            return max(8, int((longest * 16 + 32) / px_per_s) + 4)
         if kind == "slideshow":
             return max(5, int(cfg.get("interval", 20)))
         if kind == "clock":
@@ -553,7 +553,7 @@ class Automation:
                 {
                     "text": line,
                     "mode": 1,
-                    "speed": 80,
+                    "speed": max(0, min(255, int(cfg.get("speed", 80)))),
                     "size": 16,
                     "color": str(cfg.get("color", "#FFFFFF")),
                     "color_mode": 1,
