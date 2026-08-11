@@ -5,6 +5,12 @@ export interface AutomationStatus {
   nextRunAt: number | null;
   lastResult: "ok" | "error" | null;
   error: string | null;
+  wake?: {
+    enabled: boolean;
+    time: string;
+    program: "clock" | "image";
+    config: Record<string, unknown>;
+  };
 }
 
 export interface MediaItem {
@@ -71,6 +77,8 @@ export interface Preset {
   payload: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
+  pinned?: boolean;
+  plays?: number;
 }
 
 export const TEXT_MODES: Record<number, string> = {

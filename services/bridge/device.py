@@ -255,6 +255,7 @@ class DeviceManager:
             "media-add": self._act_media_add,
             "media-remove": self._act_media_remove,
             "media-sync": self._act_media_sync,
+            "wake": self._act_wake,
         }
         if action not in handlers:
             raise ValueError(f"unknown action: {action}")
@@ -606,6 +607,10 @@ class DeviceManager:
         result = await self.automation.sync_media(web_url)
         result["webUrl"] = web_url
         return result
+
+    async def _act_wake(self, payload: dict[str, Any]) -> dict[str, Any]:
+        result = self.automation.set_wake(payload)
+        return {**result, "sent": True}
 
     # ----------------------------------------------------------------- helpers
 

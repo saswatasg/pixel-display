@@ -23,12 +23,25 @@ import random
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from PIL import Image, ImageDraw
 
 log = logging.getLogger("pixelbridge.automation")
+
+# Sunrise wake timezone: IST (UTC+5:30), hardcoded so the 8 AM wake works on
+# any machine timezone and without any tz database installed.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+WAKE_DEFAULT: dict[str, Any] = {
+    "enabled": True,
+    "time": "08:00",
+    "program": "clock",
+    "config": {},
+    "lastWake": None,
+}
 
 # --------------------------------------------------------------------- fonts
 
@@ -335,6 +348,8 @@ class Automation:
         self._task: asyncio.Task | None = None
         self._stopping = False
         self._stock_cache: dict[str, Any] = {"key": None, "quotes": [], "fetched": 0.0, "idx": 0}
+        self.wake: dict[str, Any] = dict(WAKE_DEFAULT)
+        self.status["wake"] = {k: v for k, v in self.wake.items() if k != "lastWake"}
 
     # ------------------------------------------------------------- lifecycle
 
@@ -352,7 +367,12 @@ class Automation:
                 pass
 
     async def _save(self) -> None:
-        data = {"enabled": self.enabled, "explicit": self.explicit, "playlist": self.playlist}
+        data = {
+            "enabled": self.enabled,
+            "explicit": self.explicit,
+            "playlist": self.playlist,
+            "wake": self.wake,
+        }
         try:
             self.state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
@@ -366,10 +386,17 @@ class Automation:
             self.enabled = bool(data.get("enabled", False))
             self.explicit = data.get("explicit")
             self.playlist = data.get("playlist") or []
+            wake = data.get("wake")
+            if isinstance(wake, dict):
+                self.wake.update({k: v for k, v in wake.items() if k in WAKE_DEFAULT})
+            self._sync_wake_status()
             self.status["enabled"] = self.enabled
             log.info("automation resumed: enabled=%s explicit=%s playlist=%d entries", self.enabled, bool(self.explicit), len(self.playlist))
         except Exception as exc:  # noqa: BLE001
             log.warning("failed to load automation state: %s", exc)
+
+    def _sync_wake_status(self) -> None:
+        self.status["wake"] = {k: v for k, v in self.wake.items() if k != "lastWake"}
 
     # -------------------------------------------------------------- controls
 
@@ -407,6 +434,72 @@ class Automation:
         self.status["enabled"] = False
         self.status["program"] = None
         asyncio.get_running_loop().create_task(self._save())
+
+    # ----------------------------------------------------------- daily wake
+
+    def set_wake(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Configure the daily wake (8 AM IST by default): turns the display
+        back on and starts the wake program, even with the app/network down —
+        the bridge loop is local (BLE only)."""
+        if "enabled" in payload:
+            self.wake["enabled"] = bool(payload["enabled"])
+        if "time" in payload:
+            new_time = str(payload["time"]).strip()
+            if len(new_time) == 5 and new_time[2] == ":" and all(
+                c.isdigit() for c in new_time.split(":")
+            ):
+                hh, mm = (int(x) for x in new_time.split(":"))
+                if hh in range(24) and mm in range(60):
+                    self.wake["time"] = new_time
+        if "program" in payload:
+            program = str(payload["program"]).strip().lower()
+            if program in ("clock", "image"):
+                self.wake["program"] = program
+        if isinstance(payload.get("config"), dict):
+            self.wake["config"] = payload["config"]
+        self._sync_wake_status()
+        asyncio.get_running_loop().create_task(self._save())
+        log.info("wake configured: %s", {k: v for k, v in self.wake.items() if k != "lastWake"})
+        return {"ok": True, "wake": dict(self.status["wake"])}
+
+    async def _check_wake(self) -> None:
+        if not self.wake.get("enabled"):
+            return
+        try:
+            now = datetime.now(IST)
+            hh, mm = (int(x) for x in str(self.wake.get("time", "08:00")).split(":"))
+            target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            today = now.strftime("%Y-%m-%d")
+            if now < target or self.wake.get("lastWake") == today:
+                return
+            log.info("wake firing at %s IST - powering display on", now.strftime("%H:%M"))
+            await self.runner("screen", {"power": "on"})
+            program = self._wake_program()
+            if program is None:
+                log.warning("wake image program fell back to clock (empty photo frame)")
+                program = {"type": "clock", "config": {"style": 0, "color": "#FFFFFF", "showDate": True, "format24h": True}}
+            self.set_explicit(program, enabled=True)
+            await self.run_now()
+            self.wake["lastWake"] = today
+            asyncio.create_task(self._save())
+        except Exception as exc:  # noqa: BLE001
+            log.warning("wake check failed: %s", exc)
+
+    def _wake_program(self) -> dict[str, Any] | None:
+        if self.wake.get("program") != "image":
+            return {
+                "type": "clock",
+                "config": {
+                    "style": int(self.wake.get("config", {}).get("style", 0)),
+                    "color": str(self.wake.get("config", {}).get("color", "#FFFFFF")),
+                    "showDate": True,
+                    "format24h": True,
+                },
+            }
+        media = self.list_media()
+        if not media:
+            return None
+        return {"type": "slideshow", "config": {"interval": 60, "shuffle": False, "index": 0}}
 
     async def run_now(self) -> dict[str, Any]:
         program = self._resolve()
@@ -486,6 +579,7 @@ class Automation:
         while not self._stopping:
             try:
                 await self._tick()
+                await self._check_wake()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001

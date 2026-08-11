@@ -42,11 +42,17 @@ export async function deletePreset(id: string): Promise<void> {
   await fetch(`/api/presets/${id}`, { method: "DELETE" });
 }
 
-export async function updatePreset(id: string, name: string, action: string, payload: Record<string, unknown>): Promise<Preset> {
+export async function updatePreset(
+  id: string,
+  name: string,
+  action: string,
+  payload: Record<string, unknown>,
+  meta?: { pinned?: boolean; plays?: number },
+): Promise<Preset> {
   const res = await fetch(`/api/presets/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, action, payload }),
+    body: JSON.stringify({ name, action, payload, meta }),
   });
   return (await res.json()) as Preset;
 }

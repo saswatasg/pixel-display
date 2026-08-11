@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ANIMATION_STYLES } from "@/lib/types";
+import { createPreset } from "@/lib/api";
 import { Button, Card, Icon, ICONS, Slider, type IconName, Spinner } from "./ui";
 import { ColorPicker } from "./ColorPicker";
+import { PresetDialog } from "./PresetDialog";
 import {
   deleteFrameMedia,
   listFrameMedia,
@@ -65,6 +67,13 @@ export function MoreTab({ connected, onSend, onToast }: Props) {
       title: "Fullscreen color",
       desc: "Fill the whole matrix with one color.",
       render: <FullscreenPanel connected={connected} onSend={onSend} onToast={onToast} />,
+    },
+    {
+      id: "wake",
+      icon: "sun",
+      title: "Morning wake",
+      desc: "Turns the display back on every day at 8 AM IST — even while off.",
+      render: <WakePanel connected={connected} onSend={onSend} onToast={onToast} />,
     },
     {
       id: "animation",
@@ -134,8 +143,19 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
   const [interval, setIntervalMin] = useState(10);
   const [speed, setSpeed] = useState(80);
   const [busy, setBusy] = useState(false);
+  const [savingPreset, setSavingPreset] = useState(false);
 
   const list = () => symbols.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+
+  const savePreset = async (name: string) => {
+    const syms = list();
+    if (syms.length === 0) {
+      onToast("Add at least one symbol");
+      return;
+    }
+    await createPreset(name, "stocks", { symbols: syms, color, interval, speed });
+    onToast("Ticker saved as preset");
+  };
 
   const apply = async () => {
     const syms = list();
@@ -203,6 +223,9 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
           {busy ? <Spinner className="h-4 w-4" /> : <Icon d={ICONS.play} className="h-4 w-4" />}
           Start ticker
         </Button>
+        <Button variant="ghost" disabled={busy || !connected} onClick={() => setSavingPreset(true)}>
+          <Icon d={ICONS.star} className="h-4 w-4" /> Save
+        </Button>
         <Button
           variant="ghost"
           disabled={busy || !connected}
@@ -214,6 +237,12 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
           Stop
         </Button>
       </div>
+      <PresetDialog
+        defaultName={`Ticker — ${list().slice(0, 3).join(", ")}`}
+        open={savingPreset}
+        onClose={() => setSavingPreset(false)}
+        onSave={savePreset}
+      />
     </div>
   );
 }
@@ -664,6 +693,7 @@ function FullscreenPanel({ connected, onSend, onToast }: Pick<Props, "connected"
 function AnimationPanel({ connected, onSend, onToast }: Pick<Props, "connected" | "onSend" | "onToast">) {
   const [style, setStyle] = useState(0);
   const [speed, setSpeed] = useState(90);
+  const [savingPreset, setSavingPreset] = useState(false);
   return (
     <div className="space-y-3">
       <div>
@@ -696,15 +726,99 @@ function AnimationPanel({ connected, onSend, onToast }: Pick<Props, "connected" 
         format={(v) => String(v)}
         marks={[1, 90, 180, 255]}
       />
-      <Button
-        disabled={!connected}
-        onClick={async () => {
-          const ok = await onSend("animation", { style, colors: null, speed });
-          if (ok) onToast("Effect playing");
+      <div className="flex flex-wrap gap-2">
+        <Button
+          disabled={!connected}
+          onClick={async () => {
+            const ok = await onSend("animation", { style, colors: null, speed });
+            if (ok) onToast("Effect playing");
+          }}
+        >
+          <Icon d={ICONS.play} className="h-4 w-4" /> Play effect
+        </Button>
+        <Button variant="ghost" disabled={!connected} onClick={() => setSavingPreset(true)}>
+          <Icon d={ICONS.star} className="h-4 w-4" /> Save
+        </Button>
+      </div>
+      <PresetDialog
+        defaultName={`Effect — ${ANIMATION_STYLES[style as keyof typeof ANIMATION_STYLES] ?? style}`}
+        open={savingPreset}
+        onClose={() => setSavingPreset(false)}
+        onSave={async (name) => {
+          await createPreset(name, "animation", { style, colors: null, speed });
+          onToast("Effect saved as preset");
         }}
-      >
-        <Icon d={ICONS.play} className="h-4 w-4" /> Play effect
-      </Button>
+      />
+    </div>
+  );
+}
+
+function WakePanel({ connected, onSend, onToast }: Pick<Props, "connected" | "onSend" | "onToast">) {
+  const [enabled, setEnabled] = useState(true);
+  const [time, setTime] = useState("08:00");
+  const [program, setProgram] = useState<"clock" | "image">("clock");
+  const [busy, setBusy] = useState(false);
+
+  const apply = async () => {
+    if (!/^\d{2}:\d{2}$/.test(time)) {
+      onToast("Time must use HH:MM");
+      return;
+    }
+    setBusy(true);
+    try {
+      const ok = await onSend("wake", { enabled, time, program });
+      if (ok) onToast(enabled ? `Wake set for ${time} IST` : "Wake disabled");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <label className="flex items-center justify-between gap-3 text-sm text-zinc-300">
+        Wake display every morning
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+          className="h-4 w-4 accent-amber-500"
+        />
+      </label>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <SectionLabel>Time (IST)</SectionLabel>
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-2.5 font-mono text-sm text-zinc-200 outline-none focus:border-amber-500"
+            aria-label="Wake time"
+          />
+        </div>
+        <div>
+          <SectionLabel>Show at wake</SectionLabel>
+          <select
+            value={program}
+            onChange={(e) => setProgram(e.target.value as "clock" | "image")}
+            className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-200 outline-none focus:border-amber-500"
+            aria-label="Wake program"
+          >
+            <option value="clock">Clock</option>
+            <option value="image">Photo (last frame photo)</option>
+          </select>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={apply} disabled={busy || !connected}>
+          {busy ? <Spinner className="h-4 w-4" /> : <Icon d={ICONS.check} className="h-4 w-4" />}
+          {enabled ? "Schedule wake" : "Disable wake"}
+        </Button>
+      </div>
+      <p className="text-[11px] leading-relaxed text-zinc-600">
+        Runs on the bridge at {time} Indian Standard Time (IST). Works even after the display is powered off — the
+        wake turns the screen back on and shows the {program === "clock" ? "clock" : "last photo"} in the frame. The
+        screen stays off for the rest of the day until you use it again.
+      </p>
     </div>
   );
 }

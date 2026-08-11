@@ -43,6 +43,7 @@ async function writeCatalog(collection: string, items: CloudMediaItem[]) {
     contentType: "application/json",
     access: "public",
     addRandomSuffix: false,
+    allowOverwrite: true,
   });
 }
 
@@ -65,7 +66,12 @@ export async function addToCollection(
   const id = existing?.id ?? `${idPrefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const pathname = `${collection}/${id}.png`;
   const buffer = Buffer.from(base64, "base64");
-  const blob = await put(pathname, buffer, { contentType: "image/png", access: "public", addRandomSuffix: false });
+  const blob = await put(pathname, buffer, {
+    contentType: "image/png",
+    access: "public",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
   const item: CloudMediaItem = { id, name: cleanName, url: blob.url, addedAt: Date.now(), size: buffer.length };
   let next = [item, ...current.filter((it) => it.id !== id)];
   const evicted = next.slice(maxItems).map((it) => it.id);

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { AppStatus, Preset } from "@/lib/types";
-import { deletePreset } from "@/lib/api";
+import { deletePreset, sendFile, updatePreset } from "@/lib/api";
 import { Button, Card, Icon, ICONS, IconButton, Slider, type IconName } from "./ui";
 import { DisplayBezel } from "./DisplayBezel";
 import { LiveClock } from "./LiveClock";
@@ -23,6 +23,9 @@ const PRESET_META: Record<string, { icon: IconName; label: string }> = {
   chronograph: { icon: "timer", label: "Timer" },
   countdown: { icon: "timer", label: "Countdown" },
   brightness: { icon: "sun", label: "Light" },
+  image: { icon: "image", label: "Image" },
+  weather: { icon: "sun", label: "Weather" },
+  stocks: { icon: "sparkle", label: "Ticker" },
 };
 
 function formatRelative(ts: number): string {
@@ -46,9 +49,34 @@ export function HomeTab({ status, presets, onSend, onPresetChange }: Props) {
   const address = status?.bridge?.device.address;
 
   const sortedPresets = useMemo(
-    () => [...presets].sort((a, b) => b.createdAt - a.createdAt),
+    () =>
+      [...presets].sort((a, b) => {
+        const pinned = (Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))) || (b.plays ?? 0) - (a.plays ?? 0);
+        if (pinned !== 0) return pinned;
+        return b.createdAt - a.createdAt;
+      }),
     [presets],
   );
+
+  async function playPreset(preset: Preset): Promise<boolean> {
+    if (preset.action === "image" && typeof preset.payload.url === "string") {
+      const res = await fetch(preset.payload.url);
+      const blob = await res.blob();
+      const file = new File(
+        [blob],
+        String(preset.payload.name ?? preset.name).replace(/\.[^.]+$/, "") + ".png",
+        { type: "image/png" },
+      );
+      const sent = await sendFile("image", file);
+      return sent.ok;
+    }
+    return onSend(preset.action, preset.payload);
+  }
+
+  async function togglePin(preset: Preset) {
+    await updatePreset(preset.id, preset.name, preset.action, preset.payload, { pinned: !preset.pinned });
+    onPresetChange();
+  }
 
   async function removePreset(id: string) {
     await deletePreset(id);
@@ -113,16 +141,31 @@ export function HomeTab({ status, presets, onSend, onPresetChange }: Props) {
           </Button>
         }
       >
-        <Slider
-          label="Brightness"
-          value={brightness}
-          min={5}
-          max={100}
-          step={5}
-          onChange={changeBrightness}
-          format={(v) => `${v}%`}
-          marks={[5, 50, 100]}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Slider
+            label="Brightness"
+            value={brightness}
+            min={5}
+            max={100}
+            step={5}
+            onChange={changeBrightness}
+            format={(v) => `${v}%`}
+            marks={[5, 50, 100]}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!connected}
+            onClick={async () => {
+              setBusy("stop");
+              await onSend("automation-off", {});
+              setBusy(null);
+            }}
+            title="Stop every automation (weather, ticker, slideshow, scenes)"
+          >
+            {busy === "stop" ? "Stopping…" : "Stop everything"}
+          </Button>
+        </div>
       </Card>
 
       {/* Presets */}
@@ -141,9 +184,9 @@ export function HomeTab({ status, presets, onSend, onPresetChange }: Props) {
         {sortedPresets.length === 0 ? (
           <div className="rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-zinc-500">
             No presets yet. Build something in{" "}
-            <span className="text-zinc-300">Text</span>, <span className="text-zinc-300">Clock</span> or{" "}
-            <span className="text-zinc-300">Effects</span>, then save it with the{" "}
-            <span className="text-amber-300">＋ Save</span> button.
+            <span className="text-zinc-300">Text</span>, <span className="text-zinc-300">Clock</span>,{" "}
+            <span className="text-zinc-300">Weather</span> or <span className="text-zinc-300">Effects</span>, then
+            save it — star it and it lands here as a one-tap quick button.
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-2.5">
@@ -157,7 +200,9 @@ export function HomeTab({ status, presets, onSend, onPresetChange }: Props) {
                   className={`group relative overflow-hidden rounded-xl border transition-all ${
                     confirming
                       ? "border-red-500/50 bg-red-500/10"
-                      : "border-white/[0.08] bg-zinc-800/50 hover:border-white/20"
+                      : preset.pinned
+                        ? "border-amber-400/40 bg-amber-500/[0.06] hover:border-amber-400/70"
+                        : "border-white/[0.08] bg-zinc-800/50 hover:border-white/20"
                   }`}
                 >
                   <button
@@ -165,9 +210,16 @@ export function HomeTab({ status, presets, onSend, onPresetChange }: Props) {
                     disabled={isBusy || !connected}
                     onClick={async () => {
                       setBusy(preset.id);
-                      const ok = await onSend(preset.action, preset.payload);
+                      const ok = await playPreset(preset);
                       setBusy(null);
                       if (!ok) setConfirmDelete(null);
+                      if (ok) {
+                        updatePreset(preset.id, preset.name, preset.action, preset.payload, {
+                          plays: (preset.plays ?? 0) + 1,
+                        })
+                          .then(onPresetChange)
+                          .catch(() => undefined);
+                      }
                     }}
                     className={`absolute inset-0 ${confirming ? "pointer-events-none" : ""}`}
                     aria-label={`Play preset ${preset.name}`}
@@ -195,12 +247,20 @@ export function HomeTab({ status, presets, onSend, onPresetChange }: Props) {
                           </button>
                         </span>
                       ) : (
-                        <IconButton
-                          icon="trash"
-                          label={`Delete ${preset.name}`}
-                          onClick={() => setConfirmDelete(preset.id)}
-                          className="h-7 w-7 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100"
-                        />
+                        <span className="flex items-center gap-1">
+                          <IconButton
+                            icon="star"
+                            label={preset.pinned ? "Remove from quick menu" : "Add to quick menu"}
+                            onClick={() => togglePin(preset)}
+                            className={`h-7 w-7 ${preset.pinned ? "text-amber-400" : "text-zinc-600 hover:text-amber-400"}`}
+                          />
+                          <IconButton
+                            icon="trash"
+                            label={`Delete ${preset.name}`}
+                            onClick={() => setConfirmDelete(preset.id)}
+                            className="h-7 w-7 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100"
+                          />
+                        </span>
                       )}
                     </div>
                     <div className="min-w-0">
@@ -209,6 +269,9 @@ export function HomeTab({ status, presets, onSend, onPresetChange }: Props) {
                         <span className="text-zinc-400">{meta.label}</span>
                         <span>·</span>
                         <span>{formatRelative(preset.createdAt)}</span>
+                        {typeof preset.plays === "number" && preset.plays > 0 && (
+                          <span className="text-zinc-600">· {preset.plays}×</span>
+                        )}
                         {isBusy && <span className="ml-auto h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />}
                       </p>
                     </div>

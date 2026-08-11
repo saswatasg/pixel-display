@@ -7,6 +7,8 @@ import { Button, Card, Icon, ICONS, Segmented, Slider, Spinner } from "./ui";
 import { ColorPicker } from "./ColorPicker";
 import { WeatherPreview } from "./WeatherPreview";
 import { DisplayBezel } from "./DisplayBezel";
+import { PresetDialog } from "./PresetDialog";
+import { createPreset } from "@/lib/api";
 
 interface Props {
   connected: boolean;
@@ -49,6 +51,7 @@ export function WeatherTab({ connected, onSend, onToast }: Props) {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [fetching, setFetching] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [savingPreset, setSavingPreset] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const update = useCallback(
@@ -128,6 +131,18 @@ export function WeatherTab({ connected, onSend, onToast }: Props) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const savePreset = async (name: string) => {
+    await createPreset(name, "weather", {
+      lat: place.lat,
+      lon: place.lon,
+      name: place.name,
+      unit,
+      color,
+      interval: intervalMin,
+    });
+    onToast("Weather saved as preset", "success");
   };
 
   return (
@@ -241,12 +256,22 @@ export function WeatherTab({ connected, onSend, onToast }: Props) {
               {busy ? <Spinner className="h-4 w-4" /> : <Icon d={ICONS.play} className="h-4 w-4" />}
               Weather on
             </Button>
+            <Button variant="ghost" onClick={() => setSavingPreset(true)} disabled={!connected}>
+              <Icon d={ICONS.star} className="h-4 w-4" /> Save
+            </Button>
             <Button variant="ghost" onClick={turnOff} disabled={busy || !connected}>
               <Icon d={ICONS.power} className="h-4 w-4" /> Turn off
             </Button>
           </div>
         </div>
       </Card>
+
+      <PresetDialog
+        defaultName={`Weather — ${place.name}`}
+        open={savingPreset}
+        onClose={() => setSavingPreset(false)}
+        onSave={savePreset}
+      />
     </div>
   );
 }

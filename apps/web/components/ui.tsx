@@ -60,6 +60,7 @@ export const ICONS = {
   timer: "M19 8a8 8 0 1 0 1 7M21 3v4h-4",
   scoreboard: "M5 21V8M19 21V8M5 21h14M5 8h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1ZM9 12h6",
   sparkle: "M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2Z",
+  star: "M12 3l2.6 5.6 6 .8-4.4 4.2 1.1 6L12 16.9l-5.3 3 1.1-6L3.4 9.4l6-.8Z",
 } as const;
 
 export type IconName = keyof typeof ICONS;

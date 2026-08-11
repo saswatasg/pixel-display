@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { sendFile } from "@/lib/api";
+import { createPreset, sendFile } from "@/lib/api";
 import { Button, Card, Icon, ICONS } from "./ui";
 import { PixelPreview } from "./PixelPreview";
 import { DisplayBezel } from "./DisplayBezel";
 import { addPastImage, deletePastImage, listPastImages, toPixelDataUrl, uploadFrameMedia, type CloudMediaItem } from "@/lib/media";
+import { PresetDialog } from "./PresetDialog";
 
 interface Props {
   connected: boolean;
@@ -19,6 +20,7 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
   const [saving, setSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [history, setHistory] = useState<CloudMediaItem[]>([]);
+  const [presetImage, setPresetImage] = useState<CloudMediaItem | null>(null);
 
   const file = fileInfo.file;
 
@@ -77,6 +79,12 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function savePreset(name: string) {
+    if (!presetImage) return;
+    await createPreset(name, "image", { url: presetImage.url, name: presetImage.name });
+    onToast("Image saved as preset");
   }
 
   async function saveToFrame() {
@@ -192,14 +200,32 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
                 <p className="mt-1.5 truncate text-[11px] text-zinc-500" title={p.name}>
                   {p.name}
                 </p>
-                <Button size="sm" variant="ghost" className="mt-1 w-full" disabled={!connected} onClick={() => sendPast(p)}>
-                  <Icon d={ICONS.play} className="h-3 w-3" /> Send
-                </Button>
+                <div className="mt-1 flex gap-1">
+                  <Button size="sm" variant="ghost" className="flex-1" disabled={!connected} onClick={() => sendPast(p)}>
+                    <Icon d={ICONS.play} className="h-3 w-3" /> Send
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="!px-2"
+                    title="Save as a one-tap preset on the home screen"
+                    onClick={() => setPresetImage(p)}
+                  >
+                    <Icon d={ICONS.star} className="h-3 w-3" />
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
         </Card>
       )}
+
+      <PresetDialog
+        defaultName={presetImage ? presetImage.name.replace(/\.[^.]+$/, "") : ""}
+        open={presetImage !== null}
+        onClose={() => setPresetImage(null)}
+        onSave={savePreset}
+      />
 
       <Card title="Tips" icon={<Icon d={ICONS.sparkle} className="h-5 w-5" />}>
         <ul className="space-y-2 text-sm text-zinc-400">
