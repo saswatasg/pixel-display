@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { ANIMATION_STYLES } from "@/lib/types";
-import { createPreset } from "@/lib/api";
-import { Button, Card, Icon, ICONS, Slider, type IconName, Spinner } from "./ui";
+import { ANIMATION_STYLES, type AutomationStatus } from "@/lib/types";
+import { createPreset, validateUpload } from "@/lib/api";
+import { Button, Card, Icon, ICONS, Slider, type IconName, Spinner, Toggle } from "./ui";
 import { ColorPicker } from "./ColorPicker";
 import { PresetDialog } from "./PresetDialog";
 import {
@@ -18,14 +18,22 @@ const FRAME_LIMIT = 4;
 
 interface Props {
   connected: boolean;
+  automation?: AutomationStatus;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<boolean>;
   onToast: (message: string) => void;
 }
 
-export function MoreTab({ connected, onSend, onToast }: Props) {
-  const [open, setOpen] = useState<string | null>("chronograph");
+export function MoreTab({ connected, automation, onSend, onToast }: Props) {
+  const [open, setOpen] = useState<string | null>("schedule");
 
   const sections: { id: string; icon: IconName; title: string; desc: string; render: ReactNode }[] = [
+    {
+      id: "schedule",
+      icon: "clock",
+      title: "Schedule",
+      desc: "One daily timeline: weather by day, clock at night, wake at 8 AM.",
+      render: <SchedulePanel connected={connected} automation={automation} onSend={onSend} onToast={onToast} />,
+    },
     {
       id: "stockticker",
       icon: "sparkle",
@@ -39,13 +47,6 @@ export function MoreTab({ connected, onSend, onToast }: Props) {
       title: "Photo frame",
       desc: "Store images in the cloud and cycle them like a slideshow.",
       render: <PhotoFramePanel connected={connected} onSend={onSend} onToast={onToast} />,
-    },
-    {
-      id: "scenes",
-      icon: "clock",
-      title: "Scene scheduler",
-      desc: "Time-of-day playlist: weather by day, clock at night, …",
-      render: <SceneSchedulerPanel connected={connected} onSend={onSend} onToast={onToast} />,
     },
     {
       id: "chronograph",
@@ -67,13 +68,6 @@ export function MoreTab({ connected, onSend, onToast }: Props) {
       title: "Fullscreen color",
       desc: "Fill the whole matrix with one color.",
       render: <FullscreenPanel connected={connected} onSend={onSend} onToast={onToast} />,
-    },
-    {
-      id: "wake",
-      icon: "sun",
-      title: "Morning wake",
-      desc: "Turns the display back on every day at 8 AM IST — even while off.",
-      render: <WakePanel connected={connected} onSend={onSend} onToast={onToast} />,
     },
     {
       id: "animation",
@@ -267,6 +261,11 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
   }, [refresh]);
 
   const uploadFile = async (file: File) => {
+    const issue = file.type.startsWith("image/") ? validateUpload(file) : `${file.name} is not an image`;
+    if (issue) {
+      onToast(issue);
+      return;
+    }
     setUploading(true);
     try {
       const dataUrl = await toPixelDataUrl(file);
@@ -453,112 +452,219 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
   );
 }
 
-interface SceneEntry {
+interface Slot {
   start: string;
   end: string;
   program: string;
+  config: Record<string, unknown>;
 }
 
-const SCENE_PROGRAMS = ["weather", "stocks", "slideshow", "clock", "effect", "text"];
+const SLOT_PROGRAMS = ["weather", "stocks", "slideshow", "clock", "effect", "text"];
 
-function SceneSchedulerPanel({ connected, onSend, onToast }: Pick<Props, "connected" | "onSend" | "onToast">) {
-  const [entries, setEntries] = useState<SceneEntry[]>([
-    { start: "08:00", end: "20:00", program: "clock" },
-    { start: "20:00", end: "23:59", program: "effect" },
-  ]);
+const DEFAULT_SLOTS: Slot[] = [
+  { start: "08:00", end: "20:00", program: "clock", config: {} },
+  { start: "20:00", end: "23:59", program: "effect", config: {} },
+];
+
+const SORTED = (slots: Slot[]) => [...slots].sort((a, b) => a.start.localeCompare(b.start));
+
+function SchedulePanel({
+  connected,
+  automation,
+  onSend,
+  onToast,
+}: Pick<Props, "connected" | "automation" | "onSend" | "onToast">) {
+  const [slots, setSlots] = useState<Slot[]>(DEFAULT_SLOTS);
+  const [wakeEnabled, setWakeEnabled] = useState(true);
+  const [wakeTime, setWakeTime] = useState("08:00");
+  const [wakeProgram, setWakeProgram] = useState<"clock" | "image">("clock");
   const [busy, setBusy] = useState(false);
 
-  const setEntry = (i: number, patch: Partial<SceneEntry>) => {
-    setEntries((prev) => prev.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
+  // Seed the editor from the live schedule once it arrives.
+  useEffect(() => {
+    if (automation?.schedule && automation.schedule.length > 0) {
+      setSlots(
+        SORTED(
+          automation.schedule.map((s) => ({
+            start: s.start,
+            end: s.end,
+            program: s.program,
+            config: s.config ?? {},
+          })),
+        ),
+      );
+    }
+  }, [automation?.schedule]);
+
+  useEffect(() => {
+    if (automation?.wake) {
+      setWakeEnabled(automation.wake.enabled);
+      setWakeTime(automation.wake.time);
+      setWakeProgram(automation.wake.program);
+    }
+  }, [automation?.wake]);
+
+  const setSlot = (i: number, patch: Partial<Slot>) => {
+    setSlots((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
   };
 
-  const apply = async () => {
-    const valid = entries.every((e) => /^\d{2}:\d{2}$/.test(e.start) && /^\d{2}:\d{2}$/.test(e.end));
+  const applySchedule = async () => {
+    const valid = slots.every((s) => /^\d{2}:\d{2}$/.test(s.start) && /^\d{2}:\d{2}$/.test(s.end));
     if (!valid) {
       onToast("Times must use HH:MM");
       return;
     }
     setBusy(true);
     try {
-      const ok = await onSend("scene", {
+      const ok = await onSend("schedule", {
         enabled: true,
-        playlist: entries.map((e) => ({ start: e.start, end: e.end, program: e.program })),
+        slots: slots.map((s) => ({ start: s.start, end: s.end, program: s.program, config: s.config })),
       });
-      if (ok) onToast("Scenes scheduled");
+      if (ok) onToast("Schedule applied");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyWake = async () => {
+    if (!/^\d{2}:\d{2}$/.test(wakeTime)) {
+      onToast("Time must use HH:MM");
+      return;
+    }
+    setBusy(true);
+    try {
+      const ok = await onSend("wake", { enabled: wakeEnabled, time: wakeTime, program: wakeProgram });
+      if (ok) onToast(wakeEnabled ? `Wake set for ${wakeTime} IST` : "Wake disabled");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="space-y-4">
-      <SectionLabel>Playlist — earliest matching time wins (times can wrap past midnight)</SectionLabel>
-      <div className="space-y-2">
-        {entries.map((entry, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <input
-              type="time"
-              value={entry.start}
-              onChange={(e) => setEntry(i, { start: e.target.value })}
-              className="w-[92px] rounded-lg border border-white/10 bg-zinc-950 px-2 py-2 font-mono text-xs text-zinc-200 outline-none focus:border-amber-500"
-              aria-label={`Entry ${i + 1} start`}
-            />
-            <span className="text-zinc-600">→</span>
-            <input
-              type="time"
-              value={entry.end}
-              onChange={(e) => setEntry(i, { end: e.target.value })}
-              className="w-[92px] rounded-lg border border-white/10 bg-zinc-950 px-2 py-2 font-mono text-xs text-zinc-200 outline-none focus:border-amber-500"
-              aria-label={`Entry ${i + 1} end`}
-            />
-            <select
-              value={entry.program}
-              onChange={(e) => setEntry(i, { program: e.target.value })}
-              className="min-w-0 flex-1 rounded-lg border border-white/10 bg-zinc-950 px-2 py-2 text-xs text-zinc-200 outline-none focus:border-amber-500"
-              aria-label={`Entry ${i + 1} program`}
-            >
-              {SCENE_PROGRAMS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              aria-label="Remove entry"
-              onClick={() => setEntries((prev) => prev.filter((_, idx) => idx !== i))}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-500 hover:text-red-400"
-            >
-              <Icon d={ICONS.trash} className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ))}
+    <div className="space-y-5">
+      <div>
+        <SectionLabel>Day timeline — earliest matching time wins (times can wrap past midnight)</SectionLabel>
+        <div className="space-y-2">
+          {SORTED(slots).map((slot, i) => {
+            const sortedIdx = slots.indexOf(slot);
+            return (
+              <div key={`${slot.start}-${slot.program}-${i}`} className="flex items-center gap-2">
+                <input
+                  type="time"
+                  value={slot.start}
+                  onChange={(e) => setSlot(sortedIdx, { start: e.target.value })}
+                  className="w-[92px] rounded-lg border border-white/10 bg-zinc-950 px-2 py-2 font-mono text-xs text-zinc-200 outline-none focus:border-amber-500"
+                  aria-label={`Slot ${i + 1} start`}
+                />
+                <span className="text-zinc-600">→</span>
+                <input
+                  type="time"
+                  value={slot.end}
+                  onChange={(e) => setSlot(sortedIdx, { end: e.target.value })}
+                  className="w-[92px] rounded-lg border border-white/10 bg-zinc-950 px-2 py-2 font-mono text-xs text-zinc-200 outline-none focus:border-amber-500"
+                  aria-label={`Slot ${i + 1} end`}
+                />
+                <select
+                  value={slot.program}
+                  onChange={(e) => setSlot(sortedIdx, { program: e.target.value })}
+                  className="min-w-0 flex-1 rounded-lg border border-white/10 bg-zinc-950 px-2 py-2 text-xs text-zinc-200 outline-none focus:border-amber-500"
+                  aria-label={`Slot ${i + 1} program`}
+                >
+                  {SLOT_PROGRAMS.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  aria-label="Remove slot"
+                  onClick={() => setSlots((prev) => prev.filter((_, idx) => idx !== sortedIdx))}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 text-zinc-500 hover:text-red-400"
+                >
+                  <Icon d={ICONS.trash} className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              setSlots((prev) => [...prev, { start: "08:00", end: "20:00", program: "clock", config: {} }])
+            }
+          >
+            <Icon d={ICONS.plus} className="h-3.5 w-3.5" /> Add slot
+          </Button>
+          <div className="grow" />
+          <Button onClick={applySchedule} disabled={busy || !connected || slots.length === 0}>
+            {busy ? <Spinner className="h-4 w-4" /> : <Icon d={ICONS.play} className="h-4 w-4" />}
+            Apply schedule
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={busy || !connected}
+            onClick={async () => {
+              const ok = await onSend("automation-off", {});
+              if (ok) {
+                onToast("Schedule cleared");
+                setSlots(DEFAULT_SLOTS);
+              }
+            }}
+          >
+            Stop
+          </Button>
+        </div>
+        {automation?.enabled && automation.error && (
+          <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            Last run failed: {automation.error}
+          </p>
+        )}
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() =>
-            setEntries((prev) => [...prev, { start: "08:00", end: "20:00", program: "clock" }])
-          }
-        >
-          <Icon d={ICONS.plus} className="h-3.5 w-3.5" /> Add slot
+
+      <div className="space-y-3 rounded-xl border border-white/[0.08] bg-zinc-950/50 p-4">
+        <SectionLabel>Morning wake (IST)</SectionLabel>
+        <Toggle
+          label="Wake the display every morning"
+          description="Turns the display back on at the set time — even if it was powered off."
+          checked={wakeEnabled}
+          onChange={setWakeEnabled}
+        />
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <SectionLabel>Time (IST)</SectionLabel>
+            <input
+              type="time"
+              value={wakeTime}
+              onChange={(e) => setWakeTime(e.target.value)}
+              className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-2.5 font-mono text-sm text-zinc-200 outline-none focus:border-amber-500"
+              aria-label="Wake time"
+            />
+          </div>
+          <div>
+            <SectionLabel>Show at wake</SectionLabel>
+            <select
+              value={wakeProgram}
+              onChange={(e) => setWakeProgram(e.target.value as "clock" | "image")}
+              className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-200 outline-none focus:border-amber-500"
+              aria-label="Wake program"
+            >
+              <option value="clock">Clock</option>
+              <option value="image">Photo (last frame photo)</option>
+            </select>
+          </div>
+        </div>
+        <Button onClick={applyWake} disabled={busy || !connected}>
+          {wakeEnabled ? "Schedule wake" : "Disable wake"}
         </Button>
-        <div className="grow" />
-        <Button onClick={apply} disabled={busy || !connected || entries.length === 0}>
-          {busy ? <Spinner className="h-4 w-4" /> : <Icon d={ICONS.play} className="h-4 w-4" />}
-          Apply scenes
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={busy || !connected}
-          onClick={async () => {
-            const ok = await onSend("automation-off", {});
-            if (ok) onToast("Scenes stopped");
-          }}
-        >
-          Stop
-        </Button>
+        <p className="text-[11px] leading-relaxed text-zinc-600">
+          Runs on the bridge at {wakeTime} IST every day. It only starts the{" "}
+          {wakeProgram === "clock" ? "clock" : "photo frame"} if nothing was already scheduled, so a running
+          program is never replaced. Setting the wake after its time has passed schedules it for the next morning
+          instead of firing immediately.
+        </p>
       </div>
     </div>
   );
@@ -749,77 +855,6 @@ function AnimationPanel({ connected, onSend, onToast }: Pick<Props, "connected" 
           onToast("Effect saved as preset");
         }}
       />
-    </div>
-  );
-}
-
-function WakePanel({ connected, onSend, onToast }: Pick<Props, "connected" | "onSend" | "onToast">) {
-  const [enabled, setEnabled] = useState(true);
-  const [time, setTime] = useState("08:00");
-  const [program, setProgram] = useState<"clock" | "image">("clock");
-  const [busy, setBusy] = useState(false);
-
-  const apply = async () => {
-    if (!/^\d{2}:\d{2}$/.test(time)) {
-      onToast("Time must use HH:MM");
-      return;
-    }
-    setBusy(true);
-    try {
-      const ok = await onSend("wake", { enabled, time, program });
-      if (ok) onToast(enabled ? `Wake set for ${time} IST` : "Wake disabled");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <label className="flex items-center justify-between gap-3 text-sm text-zinc-300">
-        Wake display every morning
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => setEnabled(e.target.checked)}
-          className="h-4 w-4 accent-amber-500"
-        />
-      </label>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <SectionLabel>Time (IST)</SectionLabel>
-          <input
-            type="time"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-            className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-2.5 font-mono text-sm text-zinc-200 outline-none focus:border-amber-500"
-            aria-label="Wake time"
-          />
-        </div>
-        <div>
-          <SectionLabel>Show at wake</SectionLabel>
-          <select
-            value={program}
-            onChange={(e) => setProgram(e.target.value as "clock" | "image")}
-            className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-200 outline-none focus:border-amber-500"
-            aria-label="Wake program"
-          >
-            <option value="clock">Clock</option>
-            <option value="image">Photo (last frame photo)</option>
-          </select>
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button onClick={apply} disabled={busy || !connected}>
-          {busy ? <Spinner className="h-4 w-4" /> : <Icon d={ICONS.check} className="h-4 w-4" />}
-          {enabled ? "Schedule wake" : "Disable wake"}
-        </Button>
-      </div>
-      <p className="text-[11px] leading-relaxed text-zinc-600">
-        Runs on the bridge at {time} Indian Standard Time (IST), every day. When it fires, the wake turns the
-        display back on — it only starts the {program === "clock" ? "clock" : "photo frame"} if nothing was already
-        scheduled, so a running weather/ticker/slideshow is never replaced. Setting the wake after its time has
-        already passed schedules it for the next morning instead of firing immediately.
-      </p>
     </div>
   );
 }

@@ -17,7 +17,6 @@ import asyncio
 import base64
 import binascii
 import logging
-import re
 import tempfile
 import time
 from pathlib import Path
@@ -62,7 +61,7 @@ class _RateLimit:
         return True
 
 from config import Config
-from automations import Automation
+from automations import SCHEDULE_PROGRAMS, Automation, _clean_slots
 
 log = logging.getLogger("pixelbridge.device")
 
@@ -345,6 +344,7 @@ class DeviceManager:
             "slideshow": self._act_slideshow,
             "slideshow-next": self._act_slideshow_next,
             "scene": self._act_scene,
+            "schedule": self._act_schedule,
             "automation-off": self._act_automation_off,
             "media-add": self._act_media_add,
             "media-remove": self._act_media_remove,
@@ -651,42 +651,40 @@ class DeviceManager:
         }
 
     async def _act_slideshow_next(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if not self.automation.enabled or not (self.automation.explicit or {}).get("type") == "slideshow":
+        if not self.automation.enabled or not any(
+            entry.get("program") == "slideshow" for entry in self.automation.schedule
+        ):
             raise ValueError("slideshow is not active")
-        cfg = self.automation.explicit.setdefault("config", {})
-        cfg["index"] = int(cfg.get("index", 0)) + 1
-        asyncio.create_task(self.automation.run_now())
+        asyncio.create_task(self.automation.advance_slideshow())
         return {"sent": True, "queued": True, "program": "slideshow", "automation": self.automation.status}
 
     async def _act_scene(self, payload: dict[str, Any]) -> dict[str, Any]:
         playlist = payload.get("playlist")
-        if playlist is not None:
-            if not isinstance(playlist, list) or not playlist:
-                raise ValueError("scene playlist must be a non-empty list of {start,end,program}")
-            clean: list[dict[str, Any]] = []
-            for entry in playlist:
-                start = str(entry.get("start", "")).strip()
-                end = str(entry.get("end", "")).strip()
-                program = str(entry.get("program", "")).strip()
-                if not re.fullmatch(r"\d{2}:\d{2}", start) or not re.fullmatch(r"\d{2}:\d{2}", end):
-                    raise ValueError("scene times must use HH:MM")
-                if program not in (
-                    "weather", "stocks", "slideshow", "clock", "effect", "text",
-                ):
-                    raise ValueError(f"unknown scene program: {program}")
-                clean.append({"start": start, "end": end, "program": program, "config": entry.get("config") or {}})
-            self.automation.set_playlist(clean, enabled=bool(payload.get("enabled", True)))
-            asyncio.create_task(self.automation.run_now())
-            return {
-                "sent": True,
-                "queued": True,
-                "enabled": True,
-                "program": "scene",
-                "entries": len(clean),
-                "automation": self.automation.status,
-            }
-        self.automation.set_enabled(bool(payload.get("enabled", False)))
-        return {"sent": True, "enabled": self.automation.enabled, "automation": self.automation.status}
+        if playlist is None:
+            self.automation.set_enabled(bool(payload.get("enabled", False)))
+            return {"sent": True, "enabled": self.automation.enabled, "automation": self.automation.status}
+        return await self._act_schedule({"slots": playlist, "enabled": bool(payload.get("enabled", True))})
+
+    async def _act_schedule(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Canonical unified schedule action: {slots: [...], enabled?: bool}."""
+        raw = payload.get("slots")
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("schedule slots must be a non-empty list of {start,end,program,config}")
+        slots = _clean_slots(raw)
+        if not slots:
+            raise ValueError("schedule slots must use HH:MM times and a known program")
+        if len(slots) != len(raw):
+            raise ValueError("one or more slots are invalid (times must be HH:MM, programs must be known)")
+        self.automation.set_schedule(slots, enabled=bool(payload.get("enabled", True)))
+        asyncio.create_task(self.automation.run_now())
+        return {
+            "sent": True,
+            "queued": True,
+            "enabled": self.automation.enabled,
+            "program": self.automation.status.get("program"),
+            "slots": len(slots),
+            "automation": self.automation.status,
+        }
 
     async def _act_automation_off(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.automation.disable()

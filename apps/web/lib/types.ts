@@ -1,6 +1,14 @@
+export interface ScheduleSlot {
+  start: string;
+  end: string;
+  program: string;
+  config: Record<string, unknown>;
+}
+
 export interface AutomationStatus {
   enabled: boolean;
   program: string | null;
+  schedule?: ScheduleSlot[];
   lastRunAt: number | null;
   nextRunAt: number | null;
   lastResult: "ok" | "error" | null;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { createPreset, sendFile } from "@/lib/api";
+import { createPreset, sendFile, validateUpload } from "@/lib/api";
 import { Button, Card, Icon, ICONS } from "./ui";
 import { PixelPreview } from "./PixelPreview";
 import { DisplayBezel } from "./DisplayBezel";
@@ -34,19 +34,30 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
 
   const pick = useCallback(
     async (f: File | null) => {
-      setFileInfo({ file: f && f.type.startsWith("image/") ? f : null });
-      if (f && f.type.startsWith("image/")) {
-        const dataUrl = await toPixelDataUrl(f);
-        if (dataUrl) {
-          const res = await addPastImage(dataUrl, f.name);
-          if (res.ok) {
-            const items = await listPastImages();
-            setHistory(items);
-          }
+      if (!f) {
+        setFileInfo({ file: null });
+        return;
+      }
+      if (!f.type.startsWith("image/")) {
+        onToast(`${f.name} is not an image`);
+        return;
+      }
+      const issue = validateUpload(f);
+      if (issue) {
+        onToast(issue);
+        return;
+      }
+      setFileInfo({ file: f });
+      const dataUrl = await toPixelDataUrl(f);
+      if (dataUrl) {
+        const res = await addPastImage(dataUrl, f.name);
+        if (res.ok) {
+          const items = await listPastImages();
+          setHistory(items);
         }
       }
     },
-    [],
+    [onToast],
   );
 
   const deletePast = useCallback(
@@ -59,12 +70,20 @@ export function ImageTab({ connected, onSend, onToast }: Props) {
 
   const sendPast = useCallback(
     async (p: CloudMediaItem) => {
-      const res = await fetch(p.url);
-      const blob = await res.blob();
-      const f = new File([blob], p.name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png" });
-      const sent = await sendFile("image", f);
-      if (sent.ok) onToast("Past image sent to display");
-      else onToast(sent.error ?? "Send failed");
+      try {
+        const res = await fetch(p.url);
+        if (!res.ok) {
+          onToast("Could not load that image");
+          return;
+        }
+        const blob = await res.blob();
+        const f = new File([blob], p.name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png" });
+        const sent = await sendFile("image", f);
+        if (sent.ok) onToast("Past image sent to display");
+        else onToast(sent.error ?? "Send failed");
+      } catch {
+        onToast("Network error — image not sent");
+      }
     },
     [onToast],
   );

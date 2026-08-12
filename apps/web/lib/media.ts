@@ -32,47 +32,80 @@ export async function dataUrlToFile(dataUrl: string, name: string): Promise<File
   return new File([blob], name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png" });
 }
 
-async function json<T>(res: Response): Promise<T> {
-  return (await res.json()) as T;
+async function bodyOf<T>(res: Response, fallback?: unknown): Promise<T> {
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return fallback as T;
+  }
 }
 
 export async function listFrameMedia(): Promise<CloudMediaItem[]> {
-  const res = await fetch("/api/media", { cache: "no-store" });
-  const data = await json<{ ok: boolean; media?: CloudMediaItem[]; error?: string }>(res);
-  return data.media ?? [];
+  try {
+    const res = await fetch("/api/media", { cache: "no-store" });
+    const data = await bodyOf<{ ok: boolean; media?: CloudMediaItem[]; error?: string }>(res, {});
+    return data.media ?? [];
+  } catch {
+    return [];
+  }
 }
 
-export async function uploadFrameMedia(dataUrl: string, name: string): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch("/api/media", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, dataUrl }),
-  });
-  const data = await json<{ ok: boolean; error?: string }>(res);
-  return data;
+export async function uploadFrameMedia(
+  dataUrl: string,
+  name: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, dataUrl }),
+    });
+    return await bodyOf<{ ok: boolean; error?: string }>(res, { ok: false, error: "Upload failed" });
+  } catch {
+    return { ok: false, error: "Network error — upload not saved" };
+  }
 }
 
 export async function deleteFrameMedia(id: string): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`/api/media?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-  return json<{ ok: boolean; error?: string }>(res);
+  try {
+    const res = await fetch(`/api/media?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    return await bodyOf<{ ok: boolean; error?: string }>(res, { ok: false, error: "Remove failed" });
+  } catch {
+    return { ok: false, error: "Network error — not removed" };
+  }
 }
 
 export async function listPastImages(): Promise<CloudMediaItem[]> {
-  const res = await fetch("/api/past", { cache: "no-store" });
-  const data = await json<{ ok: boolean; media?: CloudMediaItem[]; error?: string }>(res);
-  return data.media ?? [];
+  try {
+    const res = await fetch("/api/past", { cache: "no-store" });
+    const data = await bodyOf<{ ok: boolean; media?: CloudMediaItem[]; error?: string }>(res, {});
+    return data.media ?? [];
+  } catch {
+    return [];
+  }
 }
 
-export async function addPastImage(dataUrl: string, name: string): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch("/api/past", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, dataUrl }),
-  });
-  return json<{ ok: boolean; error?: string }>(res);
+export async function addPastImage(
+  dataUrl: string,
+  name: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/past", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, dataUrl }),
+    });
+    return await bodyOf<{ ok: boolean; error?: string }>(res, { ok: false, error: "Save failed" });
+  } catch {
+    return { ok: false, error: "Network error — not saved" };
+  }
 }
 
 export async function deletePastImage(id: string): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`/api/past?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-  return json<{ ok: boolean; error?: string }>(res);
+  try {
+    const res = await fetch(`/api/past?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    return await bodyOf<{ ok: boolean; error?: string }>(res, { ok: false, error: "Remove failed" });
+  } catch {
+    return { ok: false, error: "Network error — not removed" };
+  }
 }

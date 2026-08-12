@@ -11,29 +11,77 @@ import { ImageTab } from "@/components/ImageTab";
 import { ClockTab } from "@/components/ClockTab";
 import { MoreTab } from "@/components/MoreTab";
 import { WeatherTab } from "@/components/WeatherTab";
-import { Skeleton, Toast, Wordmark, type ToastType } from "@/components/ui";
+import { Icon, ICONS, Skeleton, Toast, Wordmark, type ToastType } from "@/components/ui";
 
 export default function Page() {
   const [tab, setTab] = useState<Tab>("home");
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [toast, setToast] = useState<{ message: string; type?: ToastType } | null>(null);
+  const [online, setOnline] = useState(true);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const refreshStatus = useCallback(async () => {
-    setStatus(await getStatus());
-  }, []);
 
   const refreshPresets = useCallback(async () => {
     setPresets(await listPresets());
   }, []);
 
+  // Adaptive status polling: 3s when healthy, back off (3s → 30s, with jitter)
+  // while the bridge is unreachable, and pause entirely while the tab is
+  // hidden so background tabs aren't churning the API.
   useEffect(() => {
-    refreshStatus();
-    refreshPresets();
-    const interval = setInterval(refreshStatus, 3000);
-    return () => clearInterval(interval);
-  }, [refreshStatus, refreshPresets]);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let hidden = document.hidden;
+    let failures = 0;
+    let cancelled = false;
+
+    const scheduleNext = () => {
+      if (cancelled || hidden) return;
+      const base = 3000 * Math.min(2 ** failures, 8);
+      timer = setTimeout(() => void tick(), base + Math.random() * 1000);
+    };
+
+    const tick = async () => {
+      const next = await getStatus();
+      if (cancelled) return;
+      setStatus(next);
+      failures = next.bridgeOnline ? 0 : failures + 1;
+      scheduleNext();
+    };
+
+    const onVisibility = () => {
+      hidden = document.hidden;
+      if (hidden) {
+        if (timer) clearTimeout(timer);
+      } else {
+        failures = 0;
+        void tick();
+      }
+    };
+
+    void tick();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  useEffect(() => {
+    void refreshPresets();
+  }, [refreshPresets]);
+
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    setOnline(navigator.onLine);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
 
   const connected = Boolean(status?.bridgeOnline && status.bridge?.device.connected);
 
@@ -43,15 +91,19 @@ export default function Page() {
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, []);
 
+  const refreshStatus = useCallback(async () => {
+    setStatus(await getStatus());
+  }, []);
+
   const onSend = useCallback(
     async (action: string, payload: Record<string, unknown>): Promise<boolean> => {
       const res = await sendAction(action, payload);
       if (!res.ok) {
         showToast(res.error ?? "Command failed", "error");
-        refreshStatus();
+        void refreshStatus();
         return false;
       }
-      refreshStatus();
+      void refreshStatus();
       return true;
     },
     [refreshStatus, showToast],
@@ -67,6 +119,13 @@ export default function Page() {
         <StatusBar status={status} />
       </header>
 
+      {!online && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200 animate-fade-up">
+          <Icon d={ICONS.alert} className="h-4 w-4 shrink-0" />
+          You&apos;re offline — commands won&apos;t reach the display until you reconnect.
+        </div>
+      )}
+
       <div key={tab} className="animate-fade-up">
         {tab === "home" && (
           <HomeTab status={status} presets={presets} onSend={onSend} onPresetChange={refreshPresets} />
@@ -75,7 +134,9 @@ export default function Page() {
         {tab === "image" && <ImageTab connected={connected} onSend={onSend} onToast={showToast} />}
         {tab === "clock" && <ClockTab connected={connected} onSend={onSend} onToast={showToast} />}
         {tab === "weather" && <WeatherTab connected={connected} onSend={onSend} onToast={showToast} />}
-        {tab === "more" && <MoreTab connected={connected} onSend={onSend} onToast={showToast} />}
+        {tab === "more" && (
+          <MoreTab connected={connected} automation={status?.bridge?.automation} onSend={onSend} onToast={showToast} />
+        )}
       </div>
 
       {status === null && (

@@ -60,15 +60,20 @@ export function HomeTab({ status, presets, onSend, onPresetChange }: Props) {
 
   async function playPreset(preset: Preset): Promise<boolean> {
     if (preset.action === "image" && typeof preset.payload.url === "string") {
-      const res = await fetch(preset.payload.url);
-      const blob = await res.blob();
-      const file = new File(
-        [blob],
-        String(preset.payload.name ?? preset.name).replace(/\.[^.]+$/, "") + ".png",
-        { type: "image/png" },
-      );
-      const sent = await sendFile("image", file);
-      return sent.ok;
+      try {
+        const res = await fetch(preset.payload.url);
+        if (!res.ok) return false;
+        const blob = await res.blob();
+        const file = new File(
+          [blob],
+          String(preset.payload.name ?? preset.name).replace(/\.[^.]+$/, "") + ".png",
+          { type: "image/png" },
+        );
+        const sent = await sendFile("image", file);
+        return sent.ok;
+      } catch {
+        return false;
+      }
     }
     return onSend(preset.action, preset.payload);
   }

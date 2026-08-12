@@ -60,7 +60,7 @@ export function StatusBar({ status }: { status: AppStatus | null }) {
               ? "ticker"
               : automation.program === "slideshow"
                 ? "frame"
-                : "scenes"}
+                : "schedule"}
         </span>
       )}
       <span

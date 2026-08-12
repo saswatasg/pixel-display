@@ -30,6 +30,7 @@ const ALLOWED_ACTIONS = new Set([
   "slideshow",
   "slideshow-next",
   "scene",
+  "schedule",
   "automation-off",
   "wake",
   "media-sync",

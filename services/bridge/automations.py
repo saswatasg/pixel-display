@@ -330,6 +330,63 @@ def render_weather_png(
 
 # ----------------------------------------------------------------- scheduler
 
+SCHEDULE_PROGRAMS = ("weather", "stocks", "slideshow", "clock", "effect", "text")
+
+
+def _slots_from_state(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Migrate persisted state (schema 1 or 2) into the unified schedule.
+
+    - schema 2: {schedule: [...]}        -> used as-is
+    - schema 1: {explicit, playlist}     -> explicit becomes an all-day slot;
+                                             playlist becomes the schedule
+    """
+    slots = data.get("schedule")
+    if isinstance(slots, list):
+        return _clean_slots(slots)
+    explicit = data.get("explicit")
+    if isinstance(explicit, dict) and explicit.get("type"):
+        return [
+            {
+                "start": "00:00",
+                "end": "23:59",
+                "program": explicit["type"],
+                "config": explicit.get("config") or {},
+            }
+        ]
+    playlist = data.get("playlist")
+    if isinstance(playlist, list):
+        return _clean_slots(playlist)
+    return []
+
+
+def _clean_slots(slots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize a raw slot list to {start, end, program, config} entries."""
+    clean: list[dict[str, Any]] = []
+    for entry in slots:
+        start = str(entry.get("start", "")).strip()
+        end = str(entry.get("end", "")).strip()
+        program = str(entry.get("program", "")).strip()
+        if not _valid_hm(start) or not _valid_hm(end):
+            continue
+        if program not in SCHEDULE_PROGRAMS:
+            continue
+        clean.append(
+            {
+                "start": start,
+                "end": end,
+                "program": program,
+                "config": entry.get("config") if isinstance(entry.get("config"), dict) else {},
+            }
+        )
+    return clean
+
+
+def _valid_hm(value: str) -> bool:
+    if len(value) != 5 or value[2] != ":":
+        return False
+    hh, mm = value.split(":")
+    return hh.isdigit() and mm.isdigit() and int(hh) in range(24) and int(mm) in range(60)
+
 
 class Automation:
     """Runs the active program on an interval; persists across restarts."""
@@ -340,12 +397,16 @@ class Automation:
         self.state_path = Path(state_path)
         self.runner = runner
         self.enabled = False
-        self.explicit: dict[str, Any] | None = None
-        self.playlist: list[dict[str, Any]] = []
+        # ONE daily schedule drives everything (schema v2):
+        #   [{"start": "HH:MM", "end": "HH:MM", "program", "config"}, ...]
+        # A one-shot program (Start weather / ticker / frame) is simply an
+        # all-day slot — there is no second "explicit" concept anymore.
+        self.schedule: list[dict[str, Any]] = []
         self._current: dict[str, Any] | None = None
         self.status: dict[str, Any] = {
             "enabled": False,
             "program": None,
+            "schedule": [],
             "lastRunAt": None,
             "nextRunAt": None,
             "lastResult": None,
@@ -386,9 +447,9 @@ class Automation:
         good copy as `.bak` so a crash mid-write can never corrupt the only
         copy of the user's schedule/wake settings."""
         data = {
+            "schema": 2,
             "enabled": self.enabled,
-            "explicit": self.explicit,
-            "playlist": self.playlist,
+            "schedule": self.schedule,
             "wake": self.wake,
         }
         tmp = self.state_path.with_suffix(".json.tmp")
@@ -416,19 +477,18 @@ class Automation:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 self.enabled = bool(data.get("enabled", False))
-                self.explicit = data.get("explicit")
-                self.playlist = data.get("playlist") or []
+                self.schedule = _slots_from_state(data)
                 wake = data.get("wake")
                 if isinstance(wake, dict):
                     self.wake.update({k: v for k, v in wake.items() if k in WAKE_DEFAULT})
                 self._sync_wake_status()
                 self.status["enabled"] = self.enabled
+                self.status["schedule"] = self.schedule
                 log.info(
-                    "automation resumed (from %s): enabled=%s explicit=%s playlist=%d entries",
+                    "automation resumed (from %s): enabled=%s slots=%d",
                     path.name,
                     self.enabled,
-                    bool(self.explicit),
-                    len(self.playlist),
+                    len(self.schedule),
                 )
                 return
             except Exception as exc:  # noqa: BLE001
@@ -442,23 +502,30 @@ class Automation:
 
     # -------------------------------------------------------------- controls
 
-    def set_explicit(self, program: dict[str, Any], enabled: bool = True) -> None:
-        self.explicit = program
-        self.playlist = []
+    def set_schedule(self, slots: list[dict[str, Any]], enabled: bool = True) -> None:
+        """Replace the whole daily schedule (the single source of truth)."""
+        self.schedule = slots
         self.enabled = enabled
         self.status["enabled"] = enabled
+        self.status["schedule"] = slots
         self._reset_caches()
         asyncio.get_running_loop().create_task(self._save())
-        log.info("automation: explicit program %s", program.get("type"))
+        log.info("automation: schedule with %d slot(s), enabled=%s", len(slots), enabled)
 
-    def set_playlist(self, playlist: list[dict[str, Any]], enabled: bool = True) -> None:
-        self.explicit = None
-        self.playlist = playlist
-        self.enabled = enabled
-        self.status["enabled"] = enabled
-        self._reset_caches()
-        asyncio.get_running_loop().create_task(self._save())
-        log.info("automation: playlist with %d entries", len(playlist))
+    def set_explicit(self, program: dict[str, Any], enabled: bool = True) -> None:
+        """A one-shot program becomes the only (all-day) schedule slot."""
+        self.set_schedule(
+            [
+                {
+                    "start": "00:00",
+                    "end": "23:59",
+                    "program": program.get("type", "clock"),
+                    "config": program.get("config") or {},
+                }
+            ],
+            enabled=enabled,
+        )
+        log.info("automation: one-shot program %s (all-day slot)", program.get("type"))
 
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = enabled
@@ -471,11 +538,11 @@ class Automation:
 
     def disable(self) -> None:
         self.enabled = False
-        self.explicit = None
-        self.playlist = []
+        self.schedule = []
         self._current = None
         self.status["enabled"] = False
         self.status["program"] = None
+        self.status["schedule"] = []
         asyncio.get_running_loop().create_task(self._save())
 
     # ----------------------------------------------------------- daily wake
@@ -603,32 +670,36 @@ class Automation:
             return {"ok": False, "error": str(exc)}
 
     async def advance_slideshow(self) -> None:
-        """Explicitly move to the next media item."""
-        if self.explicit and self.explicit.get("type") == "slideshow":
-            cfg = self.explicit.setdefault("config", {})
-            cfg["index"] = (int(cfg.get("index", 0)) + 1) % max(1, len(self.list_media()))
-        await self.run_now()
+        """Explicitly move to the next media item in the schedule's
+        slideshow slot (if the schedule has one)."""
+        bumped = False
+        for entry in self.schedule:
+            if entry.get("program") == "slideshow":
+                cfg = entry.setdefault("config", {})
+                cfg["index"] = (int(cfg.get("index", 0)) + 1) % max(1, len(self.list_media()))
+                bumped = True
+        if bumped:
+            asyncio.get_running_loop().create_task(self._save())
+            await self.run_now()
 
     def _resolve(self) -> dict[str, Any] | None:
         if not self.enabled:
             return None
-        if self.playlist:
-            now = time.strftime("%H:%M")
-            minute_of_day = int(now[:2]) * 60 + int(now[3:5])
-            for entry in self.playlist:
-                start, end = entry.get("start"), entry.get("end")
-                if not start or not end or ":" not in start or ":" not in end:
-                    continue
-                s = int(start[:2]) * 60 + int(start[3:5])
-                e = int(end[:2]) * 60 + int(end[3:5])
-                wraps = s > e
-                inside = (minute_of_day >= s and minute_of_day < e) if not wraps else (
-                    minute_of_day >= s or minute_of_day < e
-                )
-                if inside:
-                    return {"type": entry.get("program", "clock"), "config": entry.get("config") or {}}
-            return None
-        return self.explicit
+        now = time.strftime("%H:%M")
+        minute_of_day = int(now[:2]) * 60 + int(now[3:5])
+        for entry in sorted(self.schedule, key=lambda s: s.get("start", "00:00")):
+            start, end = entry.get("start"), entry.get("end")
+            if not start or not end or ":" not in start or ":" not in end:
+                continue
+            s = int(start[:2]) * 60 + int(start[3:5])
+            e = int(end[:2]) * 60 + int(end[3:5])
+            wraps = s > e
+            inside = (minute_of_day >= s and minute_of_day < e) if not wraps else (
+                minute_of_day >= s or minute_of_day < e
+            )
+            if inside:
+                return {"type": entry.get("program", "clock"), "config": entry.get("config") or {}}
+        return None
 
     def _interval(self, program: dict[str, Any]) -> int:
         cfg = program.get("config") or {}
