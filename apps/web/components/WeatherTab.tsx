@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { geocode, fetchWeatherData, wmoLabel } from "@/lib/weather";
 import type { GeoResult, WeatherData } from "@/lib/types";
+import type { AppPrefs } from "@/lib/prefs";
+import type { PrefsPatch } from "@/lib/usePrefs";
 import { Button, Card, Icon, ICONS, Segmented, Slider, Spinner } from "./ui";
 import { ColorPicker } from "./ColorPicker";
 import { WeatherPreview } from "./WeatherPreview";
@@ -14,6 +16,9 @@ interface Props {
   connected: boolean;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<boolean>;
   onToast: (message: string, type?: "info" | "success" | "error") => void;
+  prefs?: AppPrefs | null;
+  ready?: boolean;
+  onPref?: (patch: PrefsPatch) => void;
 }
 
 const DEFAULT_PLACE: GeoResult = { name: "Berlin", country: "Germany", lat: 52.52, lon: 13.405 };
@@ -40,7 +45,7 @@ function savePlace(p: GeoResult) {
   }
 }
 
-export function WeatherTab({ connected, onSend, onToast }: Props) {
+export function WeatherTab({ connected, onSend, onToast, prefs, ready, onPref }: Props) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GeoResult[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -53,6 +58,15 @@ export function WeatherTab({ connected, onSend, onToast }: Props) {
   const [busy, setBusy] = useState(false);
   const [savingPreset, setSavingPreset] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unitApplied = useRef(false);
+
+  useEffect(() => {
+    if (!ready || !prefs || unitApplied.current) return;
+    unitApplied.current = true;
+    setUnit(prefs.weather.unit);
+    update(place, prefs.weather.unit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, prefs]);
 
   const update = useCallback(
     async (p: GeoResult, u: "c" | "f") => {
@@ -210,6 +224,7 @@ export function WeatherTab({ connected, onSend, onToast }: Props) {
             value={unit}
             onChange={(u) => {
               setUnit(u);
+              onPref?.({ weather: { unit: u } });
               update(place, u);
             }}
           />

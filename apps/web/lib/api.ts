@@ -1,4 +1,5 @@
 import type { AppStatus, ActionResult, Preset } from "./types";
+import { DEFAULT_PREFS, type AppPrefs } from "./prefs";
 
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
@@ -135,4 +136,26 @@ export async function updatePreset(
     body: JSON.stringify({ name, action, payload, meta }),
   });
   return requirePreset(res, {} as Preset);
+}
+
+export async function getPrefs(): Promise<AppPrefs> {
+  try {
+    const res = await request("/api/prefs", { cache: "no-store" });
+    const { body } = await bodyOf<{ prefs?: AppPrefs }>(res, {});
+    return body?.prefs ?? DEFAULT_PREFS;
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
+export async function savePrefs(prefs: AppPrefs): Promise<void> {
+  try {
+    await request("/api/prefs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(prefs),
+    });
+  } catch {
+    // Persisting prefs is best-effort; local state still applies this session.
+  }
 }

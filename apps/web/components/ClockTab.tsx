@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CLOCK_STYLES } from "@/lib/types";
 import { createPreset } from "@/lib/api";
+import type { AppPrefs } from "@/lib/prefs";
+import type { PrefsPatch } from "@/lib/usePrefs";
 import { Button, Card, Icon, ICONS, Toggle } from "./ui";
 import { ColorPicker } from "./ColorPicker";
 import { PresetDialog } from "./PresetDialog";
@@ -11,9 +13,12 @@ interface Props {
   connected: boolean;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<boolean>;
   onToast: (message: string) => void;
+  prefs?: AppPrefs | null;
+  ready?: boolean;
+  onPref?: (patch: PrefsPatch) => void;
 }
 
-export function ClockTab({ connected, onSend, onToast }: Props) {
+export function ClockTab({ connected, onSend, onToast, prefs, ready, onPref }: Props) {
   const [style, setStyle] = useState(0);
   const [color, setColor] = useState("#FFFFFF");
   const [format24h, setFormat24h] = useState(true);
@@ -21,6 +26,16 @@ export function ClockTab({ connected, onSend, onToast }: Props) {
   const [syncTime, setSyncTime] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const applied = useRef(false);
+
+  useEffect(() => {
+    if (!ready || !prefs || applied.current) return;
+    applied.current = true;
+    setStyle(prefs.clock.style);
+    setColor(prefs.clock.color);
+    setFormat24h(prefs.clock.format24h);
+    setShowDate(prefs.clock.showDate);
+  }, [ready, prefs]);
 
   const payload = () => ({ style, color, format24h, showDate, syncTime });
 
@@ -47,7 +62,10 @@ export function ClockTab({ connected, onSend, onToast }: Props) {
               <button
                 key={key}
                 type="button"
-                onClick={() => setStyle(n)}
+                onClick={() => {
+                  setStyle(n);
+                  onPref?.({ clock: { style: n } });
+                }}
                 aria-pressed={active}
                 className={`flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border transition-all ${
                   active
@@ -69,11 +87,33 @@ export function ClockTab({ connected, onSend, onToast }: Props) {
         <div className="space-y-4">
           <div>
             <p className="mb-2 text-sm text-zinc-300">Color</p>
-            <ColorPicker value={color} onChange={setColor} />
+            <ColorPicker
+              value={color}
+              onChange={(v) => {
+                setColor(v);
+                onPref?.({ clock: { color: v } });
+              }}
+            />
           </div>
           <div className="space-y-2">
-            <Toggle label="24-hour format" description="Show 14:05 instead of 2:05 PM" checked={format24h} onChange={setFormat24h} />
-            <Toggle label="Show date" description="Display the current date too" checked={showDate} onChange={setShowDate} />
+            <Toggle
+              label="24-hour format"
+              description="Show 14:05 instead of 2:05 PM"
+              checked={format24h}
+              onChange={(v) => {
+                setFormat24h(v);
+                onPref?.({ clock: { format24h: v } });
+              }}
+            />
+            <Toggle
+              label="Show date"
+              description="Display the current date too"
+              checked={showDate}
+              onChange={(v) => {
+                setShowDate(v);
+                onPref?.({ clock: { showDate: v } });
+              }}
+            />
             <Toggle label="Sync to device time" description="Push your Mac's time to the display" checked={syncTime} onChange={setSyncTime} />
           </div>
           <div className="flex flex-wrap gap-2 pt-1">

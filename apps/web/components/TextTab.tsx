@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TEXT_MODES } from "@/lib/types";
 import { createPreset } from "@/lib/api";
+import type { AppPrefs } from "@/lib/prefs";
+import type { PrefsPatch } from "@/lib/usePrefs";
 import { Button, Card, Icon, ICONS, Segmented, Slider } from "./ui";
 import { ColorPicker } from "./ColorPicker";
 import { PresetDialog } from "./PresetDialog";
@@ -11,6 +13,9 @@ interface Props {
   connected: boolean;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<boolean>;
   onToast: (message: string) => void;
+  prefs?: AppPrefs | null;
+  ready?: boolean;
+  onPref?: (patch: PrefsPatch) => void;
 }
 
 const MODE_OPTIONS = Object.entries(TEXT_MODES).map(([k, label]) => ({
@@ -24,7 +29,7 @@ const COLOR_OPTIONS = [
   { value: 3, label: "Rainbow" },
 ] as const;
 
-export function TextTab({ connected, onSend, onToast }: Props) {
+export function TextTab({ connected, onSend, onToast, prefs, ready, onPref }: Props) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState(1);
   const [size, setSize] = useState(16);
@@ -35,6 +40,17 @@ export function TextTab({ connected, onSend, onToast }: Props) {
   const [bgColor, setBgColor] = useState("#000000");
   const [busy, setBusy] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const applied = useRef(false);
+
+  useEffect(() => {
+    if (!ready || !prefs || applied.current) return;
+    applied.current = true;
+    setMode(prefs.text.mode);
+    setSize(prefs.text.size);
+    setSpeed(prefs.text.speed);
+    setColorMode(prefs.text.colorMode);
+    setColor(prefs.text.color);
+  }, [ready, prefs]);
 
   const payload = () => ({
     text,
@@ -121,22 +137,59 @@ export function TextTab({ connected, onSend, onToast }: Props) {
       {/* Style */}
       <Card icon={<Icon d={ICONS.sparkle} className="h-5 w-5" />} title="Style" subtitle="Animation, size and color">
         <div className="space-y-4">
-          <Segmented label="Animation" options={MODE_OPTIONS} value={mode} onChange={setMode} />
+          <Segmented
+            label="Animation"
+            options={MODE_OPTIONS}
+            value={mode}
+            onChange={(v) => {
+              setMode(v);
+              onPref?.({ text: { mode: v } });
+            }}
+          />
 
           <div className="grid grid-cols-2 gap-4">
-            <Slider label="Font size" value={size} min={8} max={24} onChange={setSize} format={(v) => `${v}px`} />
+            <Slider
+              label="Font size"
+              value={size}
+              min={8}
+              max={24}
+              onChange={(v) => {
+                setSize(v);
+                onPref?.({ text: { size: v } });
+              }}
+              format={(v) => `${v}px`}
+            />
             <Slider
               label="Speed"
               value={speed}
               min={1}
               max={100}
-              onChange={setSpeed}
+              onChange={(v) => {
+                setSpeed(v);
+                onPref?.({ text: { speed: v } });
+              }}
               format={(v) => (v === 1 ? "slow" : v === 100 ? "fast" : `${v}`)}
             />
           </div>
 
-          <Segmented label="Text color" options={[...COLOR_OPTIONS]} value={colorMode} onChange={setColorMode} />
-          {colorMode === 1 && <ColorPicker value={color} onChange={setColor} />}
+          <Segmented
+            label="Text color"
+            options={[...COLOR_OPTIONS]}
+            value={colorMode}
+            onChange={(v) => {
+              setColorMode(v);
+              onPref?.({ text: { colorMode: v } });
+            }}
+          />
+          {colorMode === 1 && (
+            <ColorPicker
+              value={color}
+              onChange={(v) => {
+                setColor(v);
+                onPref?.({ text: { color: v } });
+              }}
+            />
+          )}
 
           <div className="rounded-xl border border-white/[0.08] bg-zinc-950/60 p-3.5">
             <div className="mb-2.5 flex items-center justify-between">

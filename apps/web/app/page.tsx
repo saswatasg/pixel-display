@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppStatus, Preset } from "@/lib/types";
 import { getStatus, listPresets, sendAction } from "@/lib/api";
+import { usePrefs } from "@/lib/usePrefs";
 import { NavBar, type Tab } from "@/components/NavBar";
 import { StatusBar } from "@/components/StatusBar";
 import { HomeTab } from "@/components/HomeTab";
@@ -20,6 +21,7 @@ export default function Page() {
   const [toast, setToast] = useState<{ message: string; type?: ToastType } | null>(null);
   const [online, setOnline] = useState(true);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { prefs, ready: prefsReady, updatePrefs } = usePrefs();
 
   const refreshPresets = useCallback(async () => {
     setPresets(await listPresets());
@@ -128,14 +130,36 @@ export default function Page() {
 
       <div key={tab} className="animate-fade-up">
         {tab === "home" && (
-          <HomeTab status={status} presets={presets} onSend={onSend} onPresetChange={refreshPresets} />
+          <HomeTab
+            status={status}
+            presets={presets}
+            onSend={onSend}
+            onPresetChange={refreshPresets}
+            prefs={prefs}
+            ready={prefsReady}
+            onPref={updatePrefs}
+          />
         )}
-        {tab === "text" && <TextTab connected={connected} onSend={onSend} onToast={showToast} />}
+        {tab === "text" && (
+          <TextTab connected={connected} onSend={onSend} onToast={showToast} prefs={prefs} ready={prefsReady} onPref={updatePrefs} />
+        )}
         {tab === "image" && <ImageTab connected={connected} onSend={onSend} onToast={showToast} />}
-        {tab === "clock" && <ClockTab connected={connected} onSend={onSend} onToast={showToast} />}
-        {tab === "weather" && <WeatherTab connected={connected} onSend={onSend} onToast={showToast} />}
+        {tab === "clock" && (
+          <ClockTab connected={connected} onSend={onSend} onToast={showToast} prefs={prefs} ready={prefsReady} onPref={updatePrefs} />
+        )}
+        {tab === "weather" && (
+          <WeatherTab connected={connected} onSend={onSend} onToast={showToast} prefs={prefs} ready={prefsReady} onPref={updatePrefs} />
+        )}
         {tab === "more" && (
-          <MoreTab connected={connected} automation={status?.bridge?.automation} onSend={onSend} onToast={showToast} />
+          <MoreTab
+            connected={connected}
+            automation={status?.bridge?.automation}
+            onSend={onSend}
+            onToast={showToast}
+            prefs={prefs}
+            ready={prefsReady}
+            onPref={updatePrefs}
+          />
         )}
       </div>
 

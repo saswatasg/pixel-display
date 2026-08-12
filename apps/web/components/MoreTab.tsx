@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ANIMATION_STYLES, type AutomationStatus } from "@/lib/types";
 import { createPreset, validateUpload } from "@/lib/api";
+import type { AppPrefs } from "@/lib/prefs";
+import type { PrefsPatch } from "@/lib/usePrefs";
 import { Button, Card, Icon, ICONS, Slider, type IconName, Spinner, Toggle } from "./ui";
 import { ColorPicker } from "./ColorPicker";
 import { PresetDialog } from "./PresetDialog";
@@ -21,9 +23,12 @@ interface Props {
   automation?: AutomationStatus;
   onSend: (action: string, payload: Record<string, unknown>) => Promise<boolean>;
   onToast: (message: string) => void;
+  prefs?: AppPrefs | null;
+  ready?: boolean;
+  onPref?: (patch: PrefsPatch) => void;
 }
 
-export function MoreTab({ connected, automation, onSend, onToast }: Props) {
+export function MoreTab({ connected, automation, onSend, onToast, prefs, ready, onPref }: Props) {
   const [open, setOpen] = useState<string | null>("schedule");
 
   const sections: { id: string; icon: IconName; title: string; desc: string; render: ReactNode }[] = [
@@ -39,14 +44,14 @@ export function MoreTab({ connected, automation, onSend, onToast }: Props) {
       icon: "sparkle",
       title: "Stock ticker",
       desc: "Line up symbols and scroll prices on the display.",
-      render: <StockTickerPanel connected={connected} onSend={onSend} onToast={onToast} />,
+      render: <StockTickerPanel connected={connected} onSend={onSend} onToast={onToast} prefs={prefs} ready={ready} onPref={onPref} />,
     },
     {
       id: "photoframe",
       icon: "image",
       title: "Photo frame",
       desc: "Store images in the cloud and cycle them like a slideshow.",
-      render: <PhotoFramePanel connected={connected} onSend={onSend} onToast={onToast} />,
+      render: <PhotoFramePanel connected={connected} onSend={onSend} onToast={onToast} prefs={prefs} ready={ready} onPref={onPref} />,
     },
     {
       id: "chronograph",
@@ -131,13 +136,30 @@ function SectionLabel({ children }: { children: ReactNode }) {
   return <p className="mb-2.5 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">{children}</p>;
 }
 
-function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected" | "onSend" | "onToast">) {
+function StockTickerPanel({
+  connected,
+  onSend,
+  onToast,
+  prefs,
+  ready,
+  onPref,
+}: Pick<Props, "connected" | "onSend" | "onToast" | "prefs" | "ready" | "onPref">) {
   const [symbols, setSymbols] = useState("AAPL, NVDA");
   const [color, setColor] = useState("#7CFF6B");
   const [interval, setIntervalMin] = useState(10);
   const [speed, setSpeed] = useState(80);
   const [busy, setBusy] = useState(false);
   const [savingPreset, setSavingPreset] = useState(false);
+  const applied = useRef(false);
+
+  useEffect(() => {
+    if (!ready || !prefs || applied.current) return;
+    applied.current = true;
+    setSymbols(prefs.ticker.symbols);
+    setColor(prefs.ticker.color);
+    setIntervalMin(prefs.ticker.interval);
+    setSpeed(prefs.ticker.speed);
+  }, [ready, prefs]);
 
   const list = () => symbols.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 
@@ -177,7 +199,10 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
         <input
           type="text"
           value={symbols}
-          onChange={(e) => setSymbols(e.target.value)}
+          onChange={(e) => {
+            setSymbols(e.target.value);
+            onPref?.({ ticker: { symbols: e.target.value } });
+          }}
           placeholder="AAPL, NVDA or RELIANCE.NS, TCS.NS, INFY.NS, HDFCBANK.NS"
           className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-2.5 font-mono text-sm uppercase text-zinc-100 placeholder:font-sans placeholder:normal-case placeholder:text-zinc-600 outline-none focus:border-amber-500"
           aria-label="Stock symbols"
@@ -190,7 +215,13 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
       </div>
       <div>
         <SectionLabel>Ticker color</SectionLabel>
-        <ColorPicker value={color} onChange={setColor} />
+        <ColorPicker
+          value={color}
+          onChange={(v) => {
+            setColor(v);
+            onPref?.({ ticker: { color: v } });
+          }}
+        />
       </div>
       <Slider
         label="Refresh quotes"
@@ -198,7 +229,10 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
         min={5}
         max={120}
         step={5}
-        onChange={setIntervalMin}
+        onChange={(v) => {
+          setIntervalMin(v);
+          onPref?.({ ticker: { interval: v } });
+        }}
         format={(v) => `${v} min`}
         marks={[5, 30, 60, 120]}
       />
@@ -208,7 +242,10 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
         min={10}
         max={255}
         step={5}
-        onChange={setSpeed}
+        onChange={(v) => {
+          setSpeed(v);
+          onPref?.({ ticker: { speed: v } });
+        }}
         format={(v) => String(v)}
         marks={[10, 80, 160, 255]}
       />
@@ -241,12 +278,27 @@ function StockTickerPanel({ connected, onSend, onToast }: Pick<Props, "connected
   );
 }
 
-function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected" | "onSend" | "onToast">) {
+function PhotoFramePanel({
+  connected,
+  onSend,
+  onToast,
+  prefs,
+  ready,
+  onPref,
+}: Pick<Props, "connected" | "onSend" | "onToast" | "prefs" | "ready" | "onPref">) {
   const [media, setMedia] = useState<CloudMediaItem[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [intervalSec, setIntervalSec] = useState(20);
   const [shuffle, setShuffle] = useState(false);
+  const applied = useRef(false);
+
+  useEffect(() => {
+    if (!ready || !prefs || applied.current) return;
+    applied.current = true;
+    setIntervalSec(prefs.frame.interval);
+    setShuffle(prefs.frame.shuffle);
+  }, [ready, prefs]);
 
   const refresh = useCallback(async () => {
     try {
@@ -386,7 +438,10 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
             min={5}
             max={300}
             step={5}
-            onChange={setIntervalSec}
+            onChange={(v) => {
+              setIntervalSec(v);
+              onPref?.({ frame: { interval: v } });
+            }}
             format={(v) => `${v}s`}
             marks={[5, 20, 60, 120, 300]}
           />
@@ -395,7 +450,10 @@ function PhotoFramePanel({ connected, onSend, onToast }: Pick<Props, "connected"
             <input
               type="checkbox"
               checked={shuffle}
-              onChange={(e) => setShuffle(e.target.checked)}
+              onChange={(e) => {
+                setShuffle(e.target.checked);
+                onPref?.({ frame: { shuffle: e.target.checked } });
+              }}
               className="h-4 w-4 accent-amber-500"
             />
           </label>

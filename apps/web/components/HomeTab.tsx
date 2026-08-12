@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppStatus, Preset } from "@/lib/types";
 import { deletePreset, sendFile, updatePreset } from "@/lib/api";
+import type { AppPrefs } from "@/lib/prefs";
+import type { PrefsPatch } from "@/lib/usePrefs";
 import { Button, Card, Icon, ICONS, IconButton, Slider, type IconName } from "./ui";
 import { DisplayBezel } from "./DisplayBezel";
 import { LiveClock } from "./LiveClock";
@@ -12,6 +14,9 @@ interface Props {
   presets: Preset[];
   onSend: (action: string, payload: Record<string, unknown>) => Promise<boolean>;
   onPresetChange: () => void;
+  prefs?: AppPrefs | null;
+  ready?: boolean;
+  onPref?: (patch: PrefsPatch) => void;
 }
 
 const PRESET_META: Record<string, { icon: IconName; label: string }> = {
@@ -38,12 +43,19 @@ function formatRelative(ts: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function HomeTab({ status, presets, onSend, onPresetChange }: Props) {
+export function HomeTab({ status, presets, onSend, onPresetChange, prefs, ready, onPref }: Props) {
   const [powerOn, setPowerOn] = useState(true);
   const [brightness, setBrightness] = useState(50);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const brightnessApplied = useRef(false);
+
+  useEffect(() => {
+    if (!ready || !prefs || brightnessApplied.current) return;
+    brightnessApplied.current = true;
+    setBrightness(prefs.brightness);
+  }, [ready, prefs]);
 
   const connected = Boolean(status?.bridgeOnline && status.bridge?.device.connected);
   const address = status?.bridge?.device.address;
@@ -100,6 +112,7 @@ export function HomeTab({ status, presets, onSend, onPresetChange }: Props) {
   async function changeBrightness(value: number) {
     setBrightness(value);
     if (value % 5 === 0 || value === 100) {
+      onPref?.({ brightness: value });
       await onSend("brightness", { value });
     }
   }
