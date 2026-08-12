@@ -28,8 +28,7 @@ export function NavBar({ active, onSelect }: { active: Tab; onSelect: (tab: Tab)
               <button
                 key={tab.id}
                 type="button"
-                role="tab"
-                aria-selected={isActive}
+                aria-current={isActive ? "page" : undefined}
                 onClick={() => onSelect(tab.id)}
                 className={`relative flex flex-1 flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium transition-all duration-150 ${
                   isActive ? "text-amber-300" : "text-zinc-500 hover:text-zinc-300"

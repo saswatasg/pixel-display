@@ -121,6 +121,7 @@ export function TextTab({ connected, onSend, onToast, prefs, ready, onPref }: Pr
           onChange={(e) => setText(e.target.value.slice(0, 60))}
           rows={2}
           placeholder="Type something to show…"
+          aria-label="Message to show on the display"
           className="w-full resize-none rounded-xl border border-white/10 bg-zinc-950 px-3.5 py-2.5 text-zinc-100 placeholder-zinc-600 outline-none focus:border-amber-500"
         />
         <div className="mt-3 flex flex-wrap gap-2">
@@ -194,20 +195,21 @@ export function TextTab({ connected, onSend, onToast, prefs, ready, onPref }: Pr
           <div className="rounded-xl border border-white/[0.08] bg-zinc-950/60 p-3.5">
             <div className="mb-2.5 flex items-center justify-between">
               <span className="text-sm text-zinc-300">Background color</span>
-              <span
+              <button
+                type="button"
+                role="switch"
+                aria-checked={bgEnabled}
                 onClick={() => setBgEnabled(!bgEnabled)}
                 className={`flex h-6 w-11 cursor-pointer items-center rounded-full transition-colors ${
                   bgEnabled ? "bg-amber-500" : "bg-zinc-700"
                 }`}
-                role="switch"
-                aria-checked={bgEnabled}
               >
                 <span
                   className={`mx-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
                     bgEnabled ? "translate-x-5" : ""
                   }`}
                 />
-              </span>
+              </button>
             </div>
             {bgEnabled && (
               <div className="animate-fade-in">

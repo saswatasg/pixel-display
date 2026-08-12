@@ -23,6 +23,7 @@ export function ColorPicker({
           type="color"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          aria-label="Custom color"
           className="absolute -left-2 -top-2 h-14 w-14 cursor-pointer opacity-0"
         />
       </label>

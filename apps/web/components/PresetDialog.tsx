@@ -75,6 +75,7 @@ export function PresetDialog({
           minLength={1}
           maxLength={40}
           placeholder="My scene"
+          aria-label="Preset name"
           className="w-full rounded-xl border border-white/10 bg-zinc-950 px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-amber-500"
         />
 
