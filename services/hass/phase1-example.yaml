@@ -23,6 +23,7 @@ sensor:
     headers:
       X-API-Key: !secret pixel_bridge_key
     scan_interval: 30
+    value_template: "{{ value_json.device.connected }}"
     json_attributes_path: "$.device"
     json_attributes:
       - connected
