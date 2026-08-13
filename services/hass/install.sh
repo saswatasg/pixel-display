@@ -51,6 +51,15 @@ homeassistant:
   external_url: https://saswatas-macbook-air.taile61337.ts.net:8443
 
 default_config:
+
+# tailscaled proxies from the Docker bridge (172.16.0.0/12); without this
+# HA rejects funnel requests with 400 "not set-up for reverse proxies"
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 172.16.0.0/12
+    - 127.0.0.1
+    - 100.64.0.0/10
 YAML
 fi
 
