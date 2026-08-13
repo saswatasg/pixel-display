@@ -74,7 +74,7 @@ i=0
 while ! docker info >/dev/null 2>&1; do
     i=$((i + 1)); [ "$i" -ge 120 ] && break; sleep 1
 done
-docker compose -f "$RUN_DIR/docker-compose.yml" up -d >/dev/null 2>&1
+docker-compose -f "$RUN_DIR/docker-compose.yml" up -d >/dev/null 2>&1
 exit 0
 SH
 else
@@ -93,7 +93,7 @@ i=0
 while ! docker info >/dev/null 2>&1; do
     i=$((i + 1)); [ "$i" -ge 120 ] && break; sleep 1
 done
-docker compose -f "$RUN_DIR/docker-compose.yml" up -d >/dev/null 2>&1
+docker-compose -f "$RUN_DIR/docker-compose.yml" up -d >/dev/null 2>&1
 exit 0
 SH
 fi
@@ -111,7 +111,7 @@ sleep 3
 echo
 echo "==> Done. Verify:"
 echo "  launchctl list | grep homeassistant"
-echo "  docker compose -f ~/home-assistant/docker-compose.yml ps   (both Up)"
+echo "  docker-compose -f ~/home-assistant/docker-compose.yml ps   (both Up)"
 echo
 echo "If 'docker compose' is not installed yet (colima backend):"
 echo "  brew install colima docker docker-compose && ~/home-assistant/start.sh"

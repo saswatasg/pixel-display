@@ -60,7 +60,7 @@ Then open `https://saswatas-macbook-air.taile61337.ts.net:8443`, finish HA
 onboarding (it will ask location/name - set timezone Asia/Kolkata), and
 install HACS (HACS.xyz instructions).
 
-Verify: `docker compose -f ~/home-assistant/docker-compose.yml ps` shows both
+Verify: `docker-compose -f ~/home-assistant/docker-compose.yml ps` shows both
 `Up`; `launchctl list | grep homeassistant` shows the job.
 
 ## Phase 1 - Local-first integrations (no cloud accounts)
@@ -148,7 +148,7 @@ Starter suite:
   the app
 - **Funnel:** `"/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel
   status` to list mappings, `funnel --bg --yes --https=8443 http://127.0.0.1:8123` to re-add
-- **Update:** `docker compose -f ~/home-assistant/docker-compose.yml pull &&
+- **Update:** `docker-compose -f ~/home-assistant/docker-compose.yml pull &&
   up -d` (HA `stable` tag); the launchd agent stays untouched
 
 ## Risks
