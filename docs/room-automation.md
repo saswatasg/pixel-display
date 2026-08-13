@@ -146,8 +146,8 @@ Starter suite:
   Air; config dir is `~/home-assistant/config` (tar it for offline copies)
 - **Colima:** `colima stop` / `colima start`; Docker Desktop variant is just
   the app
-- **Funnel:** `"/Applications/Tailscale.app/Contents/MacOS/Tailscale" serve
-  status` to list mappings, `serve --bg --https=8443 8123 ...` to re-add
+- **Funnel:** `"/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel
+  status` to list mappings, `funnel --bg --yes --https=8443 http://127.0.0.1:8123` to re-add
 - **Update:** `docker compose -f ~/home-assistant/docker-compose.yml pull &&
   up -d` (HA `stable` tag); the launchd agent stays untouched
 
