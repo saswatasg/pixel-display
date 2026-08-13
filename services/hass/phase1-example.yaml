@@ -1,0 +1,30 @@
+# Phase 1 - pixel display bridge integration.
+#
+# The HA container cannot reach the bridge on the host's loopback
+# (127.0.0.1:8000), so these go through the public funnel - same TLS, same
+# X-API-Key, no extra ports. Append this file to configuration.yaml and add
+#   pixel_bridge_key: <bridge api key>
+# to config/secrets.yaml (see ~/pixel-display-bridge/config.json).
+
+rest_command:
+  pixel_bridge_text:
+    url: "https://saswatas-macbook-air.taile61337.ts.net/actions/text"
+    method: POST
+    headers:
+      X-API-Key: !secret pixel_bridge_key
+    content_type: "application/json"
+    payload: '{"text": "{{ text | default(''HELLO'') }}", "brightness": {{ brightness | default(100) }}}'
+
+sensor:
+  - platform: rest
+    name: Pixel Bridge Status
+    resource: "https://saswatas-macbook-air.taile61337.ts.net/status"
+    method: GET
+    headers:
+      X-API-Key: !secret pixel_bridge_key
+    scan_interval: 30
+    json_attributes_path: "$.device"
+    json_attributes:
+      - connected
+      - address
+      - name

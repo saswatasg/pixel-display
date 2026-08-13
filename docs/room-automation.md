@@ -70,36 +70,17 @@ Verify: `docker-compose -f ~/home-assistant/docker-compose.yml ps` shows both
 2. **TCL Google TV** - HA core `androidtv_remote`. On the TV enable
    Settings -> Network/Remote -> "Remote Control" once. HA discovers it on
    the LAN; power, volume, media, app launches.
-3. **Pixel display as HA output** - bridge is on the same host, so HA can
-   call it directly. Key lives in `~/pixel-display-bridge/config.json`.
-   Put the key in `~/home-assistant/config/secrets.yaml` as
-   `pixel_bridge_key: <key>` and add to `configuration.yaml`:
-
-```yaml
-rest_command:
-  pixel_bridge_text:
-    url: "http://127.0.0.1:8000/actions/text"
-    method: POST
-    headers:
-      X-API-Key: !secret pixel_bridge_key
-    content_type: "application/json"
-    payload: '{"text": "{{ text | default(''HELLO'') }}", "brightness": {{ brightness | default(100) }}}'
-
-sensor:
-  - platform: rest
-    name: Pixel Bridge Status
-    resource: http://127.0.0.1:8000/status
-    method: GET
-    headers:
-      X-API-Key: !secret pixel_bridge_key
-    scan_interval: 30
-    json_attributes_path: "$.device"
-    json_attributes: ["connected", "address", "name"]
-```
-
-  Other bridge endpoints (same key header): `GET /status`, `GET
-  /capabilities`, `POST /actions/{text|clock|weather|brightness|image|gif|media-add}`,
-  `POST /devices/<deviceId>/actions/<action>`.
+3. **Pixel display as HA output** - the bridge runs on the Air's loopback
+   (`127.0.0.1:8000`), which the HA container cannot reach directly.
+   Simplest robust path: call it through the public funnel (same key, no
+   extra exposure). The ready-made block lives in
+   `services/hass/phase1-example.yaml` (`rest_command` + status `sensor`);
+   append it to `configuration.yaml` and put the bridge key
+   (`~/pixel-display-bridge/config.json`) into `config/secrets.yaml` as
+   `pixel_bridge_key`. Other bridge endpoints (same key header):
+   `GET /status`, `GET /capabilities`,
+   `POST /actions/{text|clock|weather|brightness|image|gif|media-add}`,
+   `POST /devices/<deviceId>/actions/<action>`.
 
 ## Phase 2 - Cloud/account integrations
 
