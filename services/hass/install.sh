@@ -113,7 +113,7 @@ echo "==> Done. Verify:"
 echo "  launchctl list | grep homeassistant"
 echo "  docker-compose -f ~/home-assistant/docker-compose.yml ps   (both Up)"
 echo
-echo "If 'docker compose' is not installed yet (colima backend):"
+echo "If 'docker-compose' is not installed yet (colima backend):"
 echo "  brew install colima docker docker-compose && ~/home-assistant/start.sh"
 echo
 echo "Next (needs your Tailscale on the Air):"
