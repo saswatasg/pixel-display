@@ -140,6 +140,12 @@ Starter suite:
 
 ## Phase 4 - Ops
 
+- **HA 2026 note:** the `http` integration (reverse proxies, ports) is
+  store-managed since 2026.x - YAML `http:` is migrated once then ignored.
+  Reverse-proxy settings live in `config/.storage/http` (`stable` slot). The
+  funnel needs `use_x_forwarded_for: true` + `trusted_proxies:
+  [172.16.0.0/12, 127.0.0.1, 100.64.0.0/10]` there (tailscaled proxies from
+  the Docker bridge). Without it HA 400s every funnel request.
 - **Restart stack:** `~/home-assistant/start.sh` (or launchd self-heals
   within 5 min)
 - **Backup:** HA Settings -> System -> Backups -> create + download to the

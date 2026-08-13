@@ -52,14 +52,14 @@ homeassistant:
 
 default_config:
 
-# tailscaled proxies from the Docker bridge (172.16.0.0/12); without this
-# HA rejects funnel requests with 400 "not set-up for reverse proxies"
-http:
-  use_x_forwarded_for: true
-  trusted_proxies:
-    - 172.16.0.0/12
-    - 127.0.0.1
-    - 100.64.0.0/10
+# NOTE: since HA 2026.x the http integration is store-managed (UI or
+# config/.storage/http). YAML http: blocks are migrated once and then
+# IGNORED. To set reverse-proxy support without the UI, write the "stable"
+# slot of config/.storage/http directly (see docs/room-automation.md):
+#   stable.use_x_forwarded_for = true
+#   stable.trusted_proxies = [172.16.0.0/12, 127.0.0.1, 100.64.0.0/10]
+# (tailscaled proxies from the Docker bridge; without this HA rejects
+#  funnel requests with 400 "not set-up for reverse proxies")
 YAML
 fi
 
