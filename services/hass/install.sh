@@ -47,6 +47,8 @@ homeassistant:
   currency: INR
   country: IN
   time_zone: Asia/Kolkata
+  # funnel hostname must be allowed or HA answers 400 on this host
+  external_url: https://saswatas-macbook-air.taile61337.ts.net:8443
 
 default_config:
 YAML
