@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.saswatas.homeassistant</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>__RUN_DIR__/start.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Self-heal: launchd re-runs start.sh every 5 minutes. While the VM
+         (colima) or Docker Desktop is running this is a harmless no-op; after
+         a crash or wake it brings the stack back up, same pattern as the
+         pixel bridge plist. -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>StandardOutPath</key>
+    <string>__RUN_DIR__/logs/hass.log</string>
+    <key>StandardErrorPath</key>
+    <string>__RUN_DIR__/logs/hass-error.log</string>
+</dict>
+</plist>

@@ -1,0 +1,13 @@
+# Mosquitto MQTT broker config - generated from this example by install.sh.
+# The broker listens on 127.0.0.1 only (see docker-compose.yml port binding),
+# so anonymous access is acceptable for now. When the Qubo bridge is added
+# (Phase 2), create a user in the panel below and remove allow_anonymous true.
+listener 1883
+allow_anonymous true
+
+persistence true
+persistence_location /mosquitto/data/
+
+log_dest file /mosquitto/log/mosquitto.log
+log_type error
+log_type warning

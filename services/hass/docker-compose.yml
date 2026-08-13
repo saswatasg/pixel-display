@@ -1,0 +1,30 @@
+# Home Assistant + Mosquitto MQTT for the room-automation hub.
+# Deployed to ~/home-assistant by install.sh (macOS blocks iCloud Drive
+# paths for launchd agents; runtime files must live outside the repo).
+#
+# RAM budget (MacBook Air, 8 GB): HA is capped at 1.5 GB, Mosquitto ~20 MB,
+# the pixel bridge ~300 MB. Do NOT add Frigate or other heavy containers here.
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    mem_limit: 1536m
+    environment:
+      - TZ=Asia/Kolkata
+    volumes:
+      - ./config:/config
+    ports:
+      - "127.0.0.1:8123:8123"
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    restart: unless-stopped
+    mem_limit: 128m
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    ports:
+      - "127.0.0.1:1883:1883"
