@@ -53,7 +53,7 @@ On the Air, from a terminal (no Pro involved):
 # (or: cd ~/pixel-display && git pull)
 brew install colima docker docker-compose
 ./services/hass/install.sh colima          # or: ./install.sh docker
-"/Applications/Tailscale.app/Contents/MacOS/Tailscale" serve --bg --https=8443 8123 http://127.0.0.1:8123
+"/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel --bg --yes --https=8443 http://127.0.0.1:8123
 ```
 
 Then open `https://saswatas-macbook-air.taile61337.ts.net:8443`, finish HA

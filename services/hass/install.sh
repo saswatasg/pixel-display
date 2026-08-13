@@ -117,7 +117,7 @@ echo "If 'docker compose' is not installed yet (colima backend):"
 echo "  brew install colima docker docker-compose && ~/home-assistant/start.sh"
 echo
 echo "Next (needs your Tailscale on the Air):"
-echo "  \"/Applications/Tailscale.app/Contents/MacOS/Tailscale\" serve --bg --https=8443 8123 http://127.0.0.1:8123"
+echo "  \"/Applications/Tailscale.app/Contents/MacOS/Tailscale\" funnel --bg --yes --https=8443 http://127.0.0.1:8123"
 echo "  then open: https://saswatas-macbook-air.taile61337.ts.net:8443"
 echo
 echo "First time only: finish HA onboarding in the browser, then install HACS."
