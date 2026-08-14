@@ -13,9 +13,10 @@ only ever an optional place to edit this repo.
          ├─ colima VM (vmnet shared: 192.168.64.2, reachable from host) + launchd self-heal
          │    ├─ Home Assistant container (host networking)  → 192.168.64.2:8123
          │    └─ Mosquitto MQTT            (host networking) → 192.168.64.2:1883
+         ├─ ha-tunnel (launchd): colima ssh -L 127.0.0.1:8123 -> VM 8123
          └─ Tailscale funnel
-              ├─ "/"     → 8000  (pixel bridge, as today)
-              └─ :8443   → 192.168.64.2:8123  (HA dashboard, from anywhere)
+              ├─ "/"     → 127.0.0.1:8000  (pixel bridge, as today)
+              └─ :8443   → 127.0.0.1:8123  (HA dashboard, from anywhere)
 [Devices] Wiz (local UDP) · TCL Google TV (local) · Echo Dot (Alexa cloud)
           Panasonic AC (Comfort Cloud) · Ultrahuman Ring (API token)
           Qubo purifier HPH01 (MQTT bridge - Phase 2 spike) · Qubo cam (probe)
@@ -73,8 +74,13 @@ colima stop && colima delete -f
 colima start --network-address --cpu 2 --memory 4   # first time prompts sudo
 colima ssh -- hostname -I        # 192.168.64.2 = the vmnet shared address
 # (the 192.168.5.x/172.x entries are internal - ignore)
+# funnel ONLY proxies to loopback -> expose the VM's HA port via SSH tunnel,
+# installed as a launchd agent (com.saswatas.ha-tunnel) by install.sh:
+colima ssh -- -N -L 8123:localhost:8123 \
+    -o ExitOnForwardFailure=yes -o ServerAliveInterval=30
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8123/   # 200/302
 "/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel --https=8443 off
-"/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel --bg --yes --https=8443 http://192.168.64.2:8123
+"/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel --bg --yes --https=8443 http://127.0.0.1:8123
 docker-compose -f ~/home-assistant/docker-compose.yml up -d   # recreates with host networking
 ```
 
@@ -166,8 +172,11 @@ Starter suite:
   192.168.64.2; internal 192.168.5.x / 172.x entries are normal). The vmnet
   address is stable per profile - the funnel mapping survives reboots
 - **Funnel:** `"/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel
-  status` to list mappings; if the VM address changed, `funnel --https=8443 off`
-  then `funnel --bg --yes --https=8443 http://192.168.64.2:8123`
+  status` to list mappings; funnel only proxies to loopback, so after a VM
+  rebuild make sure the ha-tunnel site is up, then
+  `funnel --https=8443 off` + `funnel --bg --yes --https=8443 http://127.0.0.1:8123`
+- **ha-tunnel:** `launchctl list | grep ha-tunnel`; logs in
+  `~/home-assistant/logs/ha-tunnel.*` (KeepAlive restarts it on exit)
 - **Update:** `docker-compose -f ~/home-assistant/docker-compose.yml pull &&
   up -d` (HA `stable` tag); the launchd agent stays untouched
 

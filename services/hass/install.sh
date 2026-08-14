@@ -75,6 +75,19 @@ if [ "$BACKEND" = "colima" ]; then
         echo "ERROR: colima not found. Install: brew install colima docker docker-compose" >&2
         exit 1
     fi
+    cat > "$RUN_DIR/ha-tunnel.sh" <<'SH'
+#!/bin/sh
+# Expose the colima VM's HA port on macOS loopback so the Tailscale funnel
+# can proxy to it: tailscale funnel only proxies to 127.0.0.1/::1, and the
+# VM's vmnet address (192.168.64.2) is not loopback.
+# On the VM side the connection arrives from loopback, so HA sees the peer
+# as 127.0.0.1 (already in trusted_proxies).
+set -u
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+colima ssh -- -N -L 8123:localhost:8123 \
+    -o ExitOnForwardFailure=yes -o ServerAliveInterval=30
+exit 1
+SH
     cat > "$RUN_DIR/start.sh" <<'SH'
 #!/bin/sh
 set -u
@@ -114,28 +127,36 @@ docker-compose -f "$RUN_DIR/docker-compose.yml" up -d >/dev/null 2>&1
 exit 0
 SH
 fi
-chmod +x "$RUN_DIR/start.sh"
+chmod +x "$RUN_DIR/start.sh" "$RUN_DIR/ha-tunnel.sh"
 # secrets must not be world-readable; HA stores tokens under config/
 chmod 700 "$RUN_DIR/config" 2>/dev/null || true
 
-echo "==> Installing launchd agent"
-sed "s|__RUN_DIR__|$RUN_DIR|g" \
-    "$RUN_DIR/launchd/com.saswatas.homeassistant.plist.template" > "$PLIST"
-launchctl unload "$PLIST" 2>/dev/null || true
-launchctl load "$PLIST"
+echo "==> Installing launchd agents"
+TUNNEL_PLIST="$HOME/Library/LaunchAgents/com.saswatas.ha-tunnel.plist"
+for spec in \
+    "com.saswatas.homeassistant $PLIST $RUN_DIR/launchd/com.saswatas.homeassistant.plist.template" \
+    "com.saswatas.ha-tunnel $TUNNEL_PLIST $RUN_DIR/launchd/com.saswatas.ha-tunnel.plist.template"; do
+    set -- $spec
+    label="$1"; target="$2"; tmpl="$3"
+    sed "s|__RUN_DIR__|$RUN_DIR|g" "$tmpl" > "$target"
+    launchctl unload "$target" 2>/dev/null || true
+    launchctl load "$target"
+    echo "  loaded $label"
+done
 sleep 3
 
 echo
 echo "==> Done. Verify:"
-echo "  launchctl list | grep homeassistant"
+echo "  launchctl list | grep -E 'homeassistant|ha-tunnel'"
 echo "  docker-compose -f ~/home-assistant/docker-compose.yml ps   (both Up)"
+echo "  curl http://127.0.0.1:8123/   (200/302 - ha-tunnel is up)"
 echo
 echo "If 'docker-compose' is not installed yet (colima backend):"
 echo "  brew install colima docker docker-compose && ~/home-assistant/start.sh"
 echo
-echo "Next (needs your Tailscale on the Air; VM_IP is the LAN address from 'colima ssh -- hostname -I'):"
+echo "Next (needs your Tailscale on the Air):"
 echo "  \"/Applications/Tailscale.app/Contents/MacOS/Tailscale\" funnel --https=8443 off"
-echo "  \"/Applications/Tailscale.app/Contents/MacOS/Tailscale\" funnel --bg --yes --https=8443 http://VM_IP:8123"
+echo "  \"/Applications/Tailscale.app/Contents/MacOS/Tailscale\" funnel --bg --yes --https=8443 http://127.0.0.1:8123"
 echo "  then open: https://saswatas-macbook-air.taile61337.ts.net:8443"
 echo
 echo "First time only: finish HA onboarding in the browser, then install HACS."
