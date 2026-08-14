@@ -57,9 +57,11 @@ default_config:
 # IGNORED. To set reverse-proxy support without the UI, write the "stable"
 # slot of config/.storage/http directly (see docs/room-automation.md):
 #   stable.use_x_forwarded_for = true
-#   stable.trusted_proxies = [172.16.0.0/12, 127.0.0.1, 100.64.0.0/10]
-# (tailscaled proxies from the Docker bridge; without this HA rejects
-#  funnel requests with 400 "not set-up for reverse proxies")
+#   stable.trusted_proxies = [<HOME-LAN>/24, 172.16.0.0/12, 127.0.0.1,
+#                             100.64.0.0/10]
+# (tailscaled proxies from the host's LAN address - with the colima VM on a
+#  bridged vmnet the peer IP is the home-LAN subnet; without trusted_proxies
+#  HA rejects funnel requests with 400 "not set-up for reverse proxies")
 YAML
 fi
 
@@ -77,8 +79,11 @@ if [ "$BACKEND" = "colima" ]; then
 set -u
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 RUN_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# --network-address puts the VM on a bridged vmnet with a home-LAN IP, so
+# HA can see the Wiz bulb/Google TV/camera. First manual start needs sudo
+# once (vmnet helper); launchd-triggered starts then work silently.
 if ! colima status >/dev/null 2>&1; then
-    colima start --cpu 2 --memory 4 >/dev/null 2>&1
+    colima start --network-address --cpu 2 --memory 4 >/dev/null 2>&1
 fi
 # wait for the docker daemon (max 120s)
 i=0
@@ -127,8 +132,9 @@ echo
 echo "If 'docker-compose' is not installed yet (colima backend):"
 echo "  brew install colima docker docker-compose && ~/home-assistant/start.sh"
 echo
-echo "Next (needs your Tailscale on the Air):"
-echo "  \"/Applications/Tailscale.app/Contents/MacOS/Tailscale\" funnel --bg --yes --https=8443 http://127.0.0.1:8123"
+echo "Next (needs your Tailscale on the Air; VM_IP is the LAN address from 'colima ssh -- hostname -I'):"
+echo "  \"/Applications/Tailscale.app/Contents/MacOS/Tailscale\" funnel --https=8443 off"
+echo "  \"/Applications/Tailscale.app/Contents/MacOS/Tailscale\" funnel --bg --yes --https=8443 http://VM_IP:8123"
 echo "  then open: https://saswatas-macbook-air.taile61337.ts.net:8443"
 echo
 echo "First time only: finish HA onboarding in the browser, then install HACS."
