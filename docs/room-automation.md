@@ -10,12 +10,12 @@ only ever an optional place to edit this repo.
 [Cloud]  pixel-display app (Vercel)          - unchanged, keeps working
 [Air]    macOS, always-on, plugged in, 8 GB RAM
          ├─ pixel bridge  (127.0.0.1:8000, launchd)  - unchanged
-         ├─ colima VM (bridged vmnet, home-LAN IP) + launchd self-heal
-         │    ├─ Home Assistant container (host networking)  → LAN IP:8123
-         │    └─ Mosquitto MQTT            (host networking) → LAN IP:1883
+         ├─ colima VM (vmnet shared: 192.168.64.2, reachable from host) + launchd self-heal
+         │    ├─ Home Assistant container (host networking)  → 192.168.64.2:8123
+         │    └─ Mosquitto MQTT            (host networking) → 192.168.64.2:1883
          └─ Tailscale funnel
               ├─ "/"     → 8000  (pixel bridge, as today)
-              └─ :8443   → LAN IP:8123  (HA dashboard, from anywhere)
+              └─ :8443   → 192.168.64.2:8123  (HA dashboard, from anywhere)
 [Devices] Wiz (local UDP) · TCL Google TV (local) · Echo Dot (Alexa cloud)
           Panasonic AC (Comfort Cloud) · Ultrahuman Ring (API token)
           Qubo purifier HPH01 (MQTT bridge - Phase 2 spike) · Qubo cam (probe)
@@ -55,28 +55,35 @@ brew install colima docker docker-compose
 ./services/hass/install.sh colima          # or: ./install.sh docker
 ```
 
-### Bridged networking (why the VM needs a LAN IP)
+### Network model (why the VM needs --network-address)
 
 HA inside colima runs behind the VM's NAT by default: the container only sees
-the Docker bridge (172.18.x), never the home LAN (192.168.x) or its UDP
-broadcasts. That silently breaks every local integration (Wiz discovery,
-Google TV, camera RTSP). Fix - put the VM on a bridged vmnet and run both
-containers with `network_mode: host`:
+the Docker bridge (172.17/172.18.x), so host networking is needed for both
+containers + `colima start --network-address`. That puts the VM on a
+**vmnet host-shared** network (192.168.64.0/24, host side 192.168.64.1) -
+NOT bridged onto the home LAN:
+
+- Reachable from the host (tailscaled -> funnel -> 192.168.64.2:8123) 
+- Outbound unicast TCP/UDP to LAN devices/NAT works (manual-IP setups)
+- Broadcast discovery (WiZ UDP broadcast, mDNS/SSDP) does NOT cross the NAT
+  -> add every LAN device by IP, never rely on discovery.
 
 ```bash
 colima stop && colima delete -f
 colima start --network-address --cpu 2 --memory 4   # first time prompts sudo
-colima ssh -- hostname -I        # pick the 192.168.x.y address (ignore 172.x / 192.168.5.x)
-# LAN IP of the VM; strongly recommended: reserve that MAC in the router DHCP
+colima ssh -- hostname -I        # 192.168.64.2 = the vmnet shared address
+# (the 192.168.5.x/172.x entries are internal - ignore)
 "/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel --https=8443 off
-"/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel --bg --yes --https=8443 http://192.168.x.y:8123
+"/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel --bg --yes --https=8443 http://192.168.64.2:8123
 docker-compose -f ~/home-assistant/docker-compose.yml up -d   # recreates with host networking
 ```
 
-The `trusted_proxies` in `config/.storage/http` must include the home-LAN
-subnet (`192.168.x.0/24`) - tailscaled proxies from the host's LAN address.
-MQTT integration in HA points at `127.0.0.1:1883` now (containers share the
-VM's network stack), not `host.docker.internal`.
+`trusted_proxies` in `config/.storage/http` must include the vmnet subnet
+(`192.168.64.0/24`) - tailscaled proxies from the host's vmnet address
+(192.168.64.1). MQTT integration in HA points at `127.0.0.1:1883` now
+(containers share the VM's network stack), not `host.docker.internal`.
+Reserve the LAN devices' IPs (bulb, TV, camera) in the router instead - HA
+talks to them by IP.
 
 Then open `https://saswatas-macbook-air.taile61337.ts.net:8443`, finish HA
 onboarding (it will ask location/name - set timezone Asia/Kolkata), and
@@ -146,19 +153,21 @@ Starter suite:
 - **HA 2026 note:** the `http` integration (reverse proxies, ports) is
   store-managed since 2026.x - YAML `http:` is migrated once then ignored.
   Reverse-proxy settings live in `config/.storage/http` (`stable` slot). The
-  funnel needs `use_x_forwarded_for: true` + `trusted_proxies: [<LAN>/24,
-  172.16.0.0/12, 127.0.0.1, 100.64.0.0/10]` there (tailscaled proxies from
-  the host's LAN address). Without it HA 400s every funnel request.
+  funnel needs `use_x_forwarded_for: true` + `trusted_proxies:
+  [192.168.64.0/24, 172.16.0.0/12, 127.0.0.1, 100.64.0.0/10]` there
+  (tailscaled proxies from the host's vmnet address). Without it HA 400s
+  every funnel request.
 - **Restart stack:** `~/home-assistant/start.sh` (or launchd self-heals
   within 5 min)
 - **Backup:** HA Settings -> System -> Backups -> create + download to the
   Air; config dir is `~/home-assistant/config` (tar it for offline copies)
 - **Colima:** `colima stop` / `colima start` (start.sh adds
-  `--network-address`); VM IP: `colima ssh -- hostname -I`. Reserve the VM
-  MAC in the router so the IP (and the funnel mapping) survives reboots
+  `--network-address`); VM address: `colima ssh -- hostname -I` (expect
+  192.168.64.2; internal 192.168.5.x / 172.x entries are normal). The vmnet
+  address is stable per profile - the funnel mapping survives reboots
 - **Funnel:** `"/Applications/Tailscale.app/Contents/MacOS/Tailscale" funnel
-  status` to list mappings; if the VM IP changed, `funnel --https=8443 off`
-  then `funnel --bg --yes --https=8443 http://<VM_IP>:8123`
+  status` to list mappings; if the VM address changed, `funnel --https=8443 off`
+  then `funnel --bg --yes --https=8443 http://192.168.64.2:8123`
 - **Update:** `docker-compose -f ~/home-assistant/docker-compose.yml pull &&
   up -d` (HA `stable` tag); the launchd agent stays untouched
 

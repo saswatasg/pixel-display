@@ -57,11 +57,12 @@ default_config:
 # IGNORED. To set reverse-proxy support without the UI, write the "stable"
 # slot of config/.storage/http directly (see docs/room-automation.md):
 #   stable.use_x_forwarded_for = true
-#   stable.trusted_proxies = [<HOME-LAN>/24, 172.16.0.0/12, 127.0.0.1,
+#   stable.trusted_proxies = [192.168.64.0/24, 172.16.0.0/12, 127.0.0.1,
 #                             100.64.0.0/10]
-# (tailscaled proxies from the host's LAN address - with the colima VM on a
-#  bridged vmnet the peer IP is the home-LAN subnet; without trusted_proxies
-#  HA rejects funnel requests with 400 "not set-up for reverse proxies")
+# (tailscaled proxies from the host's vmnet address 192.168.64.1 - colima
+#  --network-address puts the VM on a host-shared 192.168.64.0/24 network;
+#  without trusted_proxies HA rejects funnel requests with 400
+#  "not set-up for reverse proxies")
 YAML
 fi
 
