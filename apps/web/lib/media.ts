@@ -1,3 +1,5 @@
+import { readLocal, writeLocal } from "./local-store";
+
 export interface CloudMediaItem {
   id: string;
   name: string;
@@ -32,80 +34,27 @@ export async function dataUrlToFile(dataUrl: string, name: string): Promise<File
   return new File([blob], name.replace(/\.[^.]+$/, "") + ".png", { type: "image/png" });
 }
 
-async function bodyOf<T>(res: Response, fallback?: unknown): Promise<T> {
-  try {
-    return (await res.json()) as T;
-  } catch {
-    return fallback as T;
-  }
+function items(key: string): CloudMediaItem[] {
+  const value = readLocal<unknown>(key, []);
+  return Array.isArray(value) ? value.filter(m => m && typeof m.id === "string" && typeof m.url === "string" && m.url.startsWith("data:image/png;")) : [];
 }
-
-export async function listFrameMedia(): Promise<CloudMediaItem[]> {
+async function add(key: string, dataUrl: string, name: string, limit: number) {
   try {
-    const res = await fetch("/api/media", { cache: "no-store" });
-    const data = await bodyOf<{ ok: boolean; media?: CloudMediaItem[]; error?: string }>(res, {});
-    return data.media ?? [];
-  } catch {
-    return [];
-  }
+    if (!dataUrl.startsWith("data:image/png;") || dataUrl.length > 40000) throw new Error("Choose a converted 32×32 PNG image.");
+    const old = items(key);
+    if (key === "frame:v2" && old.length >= limit) throw new Error("Frame is full. Remove a photo first.");
+    const media = { id: crypto.randomUUID(), name, url: dataUrl, size: dataUrl.length, addedAt: Date.now() };
+    writeLocal(key, [...old, media].slice(-limit));
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Save failed" }; }
 }
-
-export async function uploadFrameMedia(
-  dataUrl: string,
-  name: string,
-): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const res = await fetch("/api/media", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, dataUrl }),
-    });
-    return await bodyOf<{ ok: boolean; error?: string }>(res, { ok: false, error: "Upload failed" });
-  } catch {
-    return { ok: false, error: "Network error — upload not saved" };
-  }
+async function remove(key: string, id: string) {
+  try { writeLocal(key, items(key).filter(m => m.id !== id)); return { ok: true }; }
+  catch (e) { return { ok: false, error: e instanceof Error ? e.message : "Remove failed" }; }
 }
-
-export async function deleteFrameMedia(id: string): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const res = await fetch(`/api/media?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    return await bodyOf<{ ok: boolean; error?: string }>(res, { ok: false, error: "Remove failed" });
-  } catch {
-    return { ok: false, error: "Network error — not removed" };
-  }
-}
-
-export async function listPastImages(): Promise<CloudMediaItem[]> {
-  try {
-    const res = await fetch("/api/past", { cache: "no-store" });
-    const data = await bodyOf<{ ok: boolean; media?: CloudMediaItem[]; error?: string }>(res, {});
-    return data.media ?? [];
-  } catch {
-    return [];
-  }
-}
-
-export async function addPastImage(
-  dataUrl: string,
-  name: string,
-): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const res = await fetch("/api/past", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, dataUrl }),
-    });
-    return await bodyOf<{ ok: boolean; error?: string }>(res, { ok: false, error: "Save failed" });
-  } catch {
-    return { ok: false, error: "Network error — not saved" };
-  }
-}
-
-export async function deletePastImage(id: string): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const res = await fetch(`/api/past?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    return await bodyOf<{ ok: boolean; error?: string }>(res, { ok: false, error: "Remove failed" });
-  } catch {
-    return { ok: false, error: "Network error — not removed" };
-  }
-}
+export async function listFrameMedia(): Promise<CloudMediaItem[]> { return items("frame:v2"); }
+export async function uploadFrameMedia(dataUrl: string, name: string) { return add("frame:v2", dataUrl, name, 4); }
+export async function deleteFrameMedia(id: string) { return remove("frame:v2", id); }
+export async function listPastImages(): Promise<CloudMediaItem[]> { return items("past:v2"); }
+export async function addPastImage(dataUrl: string, name: string) { return add("past:v2", dataUrl, name, 24); }
+export async function deletePastImage(id: string) { return remove("past:v2", id); }

@@ -1,47 +1,20 @@
-export interface ScheduleSlot {
-  start: string;
-  end: string;
-  program: string;
-  config: Record<string, unknown>;
-}
-
 export interface AutomationStatus {
   enabled: boolean;
   program: string | null;
-  schedule?: ScheduleSlot[];
   lastRunAt: number | null;
   nextRunAt: number | null;
   lastResult: "ok" | "error" | null;
   error: string | null;
-  wake?: {
-    enabled: boolean;
-    time: string;
-    program: "clock" | "image";
-    config: Record<string, unknown>;
-  };
 }
 
-export interface MediaItem {
+export interface DeviceStatus {
+  id: string;
   name: string;
-  size: number;
-  addedAt: number;
-}
-
-export interface BridgeStatus {
-  bridge: "online";
-  uptimeSec: number;
-  device: {
-    id: string;
-    name: string;
-    address: string | null;
-    connected: boolean;
-    displaySize: number;
-    lastAction: { action: string; at: number } | null;
-    lastError: string | null;
-    lastConnectedAt: number | null;
-  };
-  automation?: AutomationStatus;
-  media?: { count: number };
+  connected: boolean;
+  displaySize: number;
+  lastAction: { action: string; at: number } | null;
+  lastError: string | null;
+  lastConnectedAt: number | null;
 }
 
 export interface GeoResult {
@@ -64,10 +37,10 @@ export interface WeatherData {
 }
 
 export interface AppStatus {
-  bridgeOnline: boolean;
-  configured: boolean;
+  supported: boolean;
   reason?: string;
-  bridge?: BridgeStatus;
+  device: DeviceStatus;
+  automation: AutomationStatus;
   fetchedAt: number;
 }
 

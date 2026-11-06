@@ -1,82 +1,108 @@
 # Pixel Display Controller
 
-Web-based control for the APEX / iDotMatrix 32×32 pixel display, replacing the
-manufacturer's app. Built as a modular device driver for a future home-automation platform.
+Control an APEX / iDotMatrix **32×32** display directly from the Bluetooth radio
+in the phone or computer viewing the website. No Tailscale, Python bridge,
+API key, cloud storage account, or always-on Mac is needed.
 
 ```
-┌─────────────────────┐   HTTPS   ┌──────────────────────┐   BLE   ┌────────────────┐
-│  Web UI (Vercel)     │ ────────► │  Device Bridge        │ ──────► │  Pixel Display  │
-│  Next.js (apps/web)  │ ◄──────── │  FastAPI (services/  │ ◄────── │  (IDM-xxxxxx)   │
-└─────────────────────┘           │  bridge) on your Mac  │         └────────────────┘
-                                  └──────────────────────┘
+Chrome on your phone or computer → Bluetooth Low Energy → nearby IDM display
 ```
 
-- **Web UI** — Next.js app, deploy on Vercel. Pure frontend; all device traffic goes through
-  its API routes, so the bridge address/token never reach the browser.
-- **Device Bridge** — local FastAPI service holding the BLE connection
-  (`idotmatrix` library), exposed over your Tailscale network with HTTPS. Runs 24/7 via
-  `launchd`.
-- **Why two tiers:** BLE needs radio proximity. Vercel can't talk BLE; the Mac can. This is
-  the same hub pattern Home Assistant uses, which is what makes it home-automation-ready.
-
-## Quick start (macOS)
-
-### 1. Bridge (on your Mac, near the display)
-
-```sh
-cd services/bridge
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp config.example.json config.json   # set apiKey; leave address "auto" for discovery
-uvicorn app:app --host 127.0.0.1 --port 8000
-```
-
-Check it sees your display: `curl -H "X-API-Key: <key>" http://127.0.0.1:8000/status`
-(`connected: true`). Then expose it over Tailscale: `tailscale serve --bg 8000`.
-
-Full install as a launchd service + Tailscale setup: `services/bridge/README.md`.
-
-### 2. Web app
+## Run locally
 
 ```sh
 cd apps/web
-npm install
-# .env.local:  BRIDGE_URL=http://127.0.0.1:8000   BRIDGE_API_KEY=<key>
-npm run dev          # local
-vercel deploy        # production; set BRIDGE_URL=https://<machine>.<tailnet>.ts.net
+npm ci
+npm run dev
 ```
 
-### 3. Presets
+Open `http://localhost:3000` in Chrome on that computer, click **Connect display**,
+and choose the `IDM-…` device in the browser's Bluetooth picker. Keep the display
+nearby and Bluetooth enabled. Disconnect the manufacturer app, other controllers,
+and any previously running bridge if the display is occupied.
 
-Stored in Vercel KV in production (set `KV_REST_API_URL` / `KV_REST_API_TOKEN`), or in a
-local `data/presets.json` during development.
+The site must use **HTTPS** when opened on another device. Plain HTTP at a LAN
+IP address does not enable Web Bluetooth; localhost is the development exception.
 
-## Repo layout
+## Deploy
 
-```
-├── apps/web/                # Next.js UI (Vercel)
-│   ├── app/                 #   pages + API proxy routes (/api/status, /api/action/...)
-│   ├── components/          #   mobile-first screens: Home, Text, Image, Clock, More
-│   └── lib/                 #   client api, types, preset storage (KV + file fallback)
-├── services/bridge/         # Python FastAPI device bridge
-│   ├── app.py               #   REST + WS API, API-key auth
-│   ├── device.py            #   BLE manager: reconnect loop, serialized action queue
-│   ├── config.json          #   local config (gitignored)
-│   └── launchd/             #   launchd plist template
-└── docs/
-    ├── api-contract.md      # concrete bridge API
-    └── device-module-spec.md# generic device-module contract for the future platform
+This is a static Next.js export:
+
+```sh
+cd apps/web
+npm run build
 ```
 
-## Status
+Serve `apps/web/out/` from any HTTPS static host. For Vercel use `apps/web` as the
+project root, `npm run build` as the build command, and `out` as the output directory.
+No environment variables or server functions are needed. Remove old bridge,
+login and cloud-storage environment variables from previous deployments.
 
-Phase 1 (MVP) complete: text, image, GIF, clock, brightness, screen power, flip,
-chronograph, countdown, fullscreen color, animations, scoreboard, presets — all verified
-against a real display. Remote access over Tailscale HTTPS, API-key auth, auto-reconnect.
+## Devices
 
-## Security model
+- Chrome on macOS, Windows, and Android with Bluetooth Low Energy support.
+- Safari, Firefox, and **all iPhone/iPad browsers including Chrome** are unsupported
+  in this version. The interface explains this and disables pairing.
+- Each browser asks for permission separately. Connect one controller at a time.
+- Browser permissions can be revoked in site settings. “Choose another display”
+  clears the current selection in the app; it does not revoke browser permissions.
 
-- Bridge binds `127.0.0.1` only; Tailscale is the transport to the outside.
-- `X-API-Key` required on every endpoint even inside the tailnet.
-- Web UI proxies every write through its own API routes (bridge URL/token stay server-side).
-- Presets contain only names and display settings — no credentials.
+## The redesigned workspace
+
+A desktop workspace and a mobile remote share four destinations: **Display**, **Studio**,
+**Library**, and **Device**. The interface follows the current device’s light/dark setting.
+Desktop uses a persistent sidebar and side-by-side editors. Phones use bottom navigation,
+compact previews, touch drawing, and pinned Save/Send controls.
+
+The Studio includes text styling, image fitting/cropping, GIF uploads, and a 32×32 pixel
+editor with keyboard support, undo/redo and starter artwork. The Library preserves existing
+scenes and photos and adds favorites, search, rename, import/export and photo rotation.
+Device settings contain pairing, optional screen wake lock, installation when supported,
+and Bluetooth troubleshooting.
+
+Product decisions, removed/redundant controls, responsive behavior and future bets:
+[product and experience design](docs/product-design.md).
+
+## Features
+
+- Text and animation modes, custom/rainbow colors, background colors and font size.
+- Images resized to RGB 32×32 PNG; GIFs resized and re-encoded in the browser.
+- Clock styles, date/12/24-hour settings and time sync using the current device's time.
+- Brightness, display power, animated effects, fullscreen color, flip, countdown,
+  stopwatch and scoreboard.
+- Scenes, settings, earlier images, and slideshow pictures saved **in this browser**.
+  These do not sync across devices. Clearing site data removes them. Previously
+  cloud-saved content is not automatically imported. Storage failures are surfaced.
+- Weather (internet required) and photo-frame slideshows run while the page is open
+  and connected. Background tabs, screen lock, or sleep can pause updates. Closing
+  the page ends these programs; reconnecting does not silently restart them.
+- Display-native modes such as clocks, effects and timers are handed to the panel.
+
+Legacy daily schedules, morning wake and stock ticker are not available in this
+web-only version. They depended on an always-on bridge, including its quote fetcher.
+A website cannot promise unattended wake or scheduled Bluetooth writes while closed.
+The UI states these limits instead of offering controls that call a missing server.
+
+## Development and validation
+
+```sh
+cd apps/web
+npm run typecheck
+npm test
+npm run build
+```
+
+Protocol vectors, PNG encoding, and fake-GATT lifecycle tests cover the browser
+implementation. Real BLE interoperability still needs to be checked on the physical
+32×32 display on each target platform; see [the manual checks](docs/direct-bluetooth.md).
+“Sent” means all Bluetooth writes completed, not that the panel acknowledged rendering.
+
+## Layout
+
+- `apps/web/`: static browser app; `lib/bluetooth/` contains connection, packet encoding,
+  font/image/GIF conversion and page-lifetime programs.
+- `services/bridge/`, `services/hass/`: retained legacy integrations, not used by the web app.
+- Other bridge API / automation documents in `docs/` describe those legacy services.
+
+The protocol port is adapted from `idotmatrix` 0.0.9 (GPL-3.0); see
+[third-party notices](apps/web/THIRD_PARTY_NOTICES.md). The bundled font retains its license.

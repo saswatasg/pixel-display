@@ -1,3 +1,5 @@
+> Legacy bridge documentation. The web app now uses direct Bluetooth; see [direct-bluetooth.md](direct-bluetooth.md).
+
 # Device Module Spec — the generic contract
 
 This is the contract every device module in the future home-automation platform implements.

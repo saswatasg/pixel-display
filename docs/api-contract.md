@@ -1,3 +1,5 @@
+> Legacy bridge documentation. The web app now uses direct Bluetooth; see [direct-bluetooth.md](direct-bluetooth.md).
+
 # API Contract — Pixel Display Device Module
 
 Base URL: `https://<bridge>` (localhost:8000 locally, `https://<machine>.<tailnet>.ts.net` over

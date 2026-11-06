@@ -9,28 +9,20 @@ export const metadata: Metadata = {
   icons: { icon: "/icon.svg" },
   openGraph: {
     title: "Pixel Display Controller",
-    description: "Control your 32×32 LED display from anywhere.",
+    description: "Control your nearby 32×32 LED display using this device’s Bluetooth.",
     type: "website",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#09090b",
+  themeColor: [{ media: "(prefers-color-scheme: light)", color: "#f8f8f5" }, { media: "(prefers-color-scheme: dark)", color: "#181b19" }],
   viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body className="min-h-screen bg-zinc-950 font-sans text-zinc-100 antialiased">
+      <body>
         <ErrorBoundary>{children}</ErrorBoundary>
       </body>
     </html>

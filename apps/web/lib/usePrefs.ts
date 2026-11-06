@@ -57,7 +57,9 @@ export function usePrefs() {
     setPrefs(latest.current);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      void savePrefs(latest.current);
+      void savePrefs(latest.current).catch(() => {
+        window.dispatchEvent(new CustomEvent("pixel-storage-error"));
+      });
     }, 800);
   }, []);
 

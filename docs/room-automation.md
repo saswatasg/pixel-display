@@ -1,3 +1,5 @@
+> Legacy bridge documentation. The web app now uses direct Bluetooth; see [direct-bluetooth.md](direct-bluetooth.md).
+
 # Room Automation Hub (Home Assistant on the Air)
 
 Full plan + runbook for turning the always-on MacBook Air into the home
